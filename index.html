@@ -57,34 +57,35 @@
 
     <!-- Firebase Imports -->
     <script type="module">
-    import { initializeApp } from "firebase/app";
-    import { getAnalytics } from "firebase/analytics";
-    // TODO: Add SDKs for Firebase products that you want to use
-    // https://firebase.google.com/docs/web/setup#available-libraries
+        // Corrected Firebase v9+ modular imports for web
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getFirestore, doc, setDoc, onSnapshot, collection, updateDoc, serverTimestamp, query, orderBy } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        
+        // Your web app's Firebase configuration
+        const firebaseConfig = {
+          apiKey: "AIzaSyBP2pYBRM4Eri0AJr4iZ2P7b08Cs6pTrtg",
+          authDomain: "qr-gen-637fb.firebaseapp.com",
+          projectId: "qr-gen-637fb",
+          storageBucket: "qr-gen-637fb.appspot.com",
+          messagingSenderId: "146967798778",
+          appId: "1:146967798778:web:55f179f4ae3f3916f6ba43",
+          measurementId: "G-1F0XF63NJP"
+        };
 
-    // Your web app's Firebase configuration
-    // For Firebase JS SDK v7.20.0 and later, measurementId is optional
-    const firebaseConfig = {
-      apiKey: "AIzaSyBP2pYBRM4Eri0AJr4iZ2P7b08Cs6pTrtg",
-      authDomain: "qr-gen-637fb.firebaseapp.com",
-      projectId: "qr-gen-637fb",
-      storageBucket: "qr-gen-637fb.firebasestorage.app",
-      messagingSenderId: "146967798778",
-      appId: "1:146967798778:web:55f179f4ae3f3916f6ba43",
-      measurementId: "G-1F0XF63NJP"
-    };
+        // Initialize Firebase and services
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+        const appId = firebaseConfig.projectId; // Use projectId for the path
 
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
-const analytics = getAnalytics(app);
-
+        // Make Firebase services available globally for the React script
         window.db = db;
         window.auth = auth;
         window.appId = appId;
-        window.initialAuthToken = initialAuthToken;
         window.firebase = {
             doc, setDoc, onSnapshot, collection, updateDoc, serverTimestamp, query, orderBy,
-            signInAnonymously, signInWithCustomToken
+            signInAnonymously
         };
         
         // This signals that Firebase is ready, so React can render
@@ -205,24 +206,19 @@ const analytics = getAnalytics(app);
 
             useEffect(() => {
                 const cardsCollectionRef = window.firebase.collection(window.db, `/artifacts/${window.appId}/public/data/equatino-cards`);
-                console.log("ADMIN: Reading from Firestore path:", cardsCollectionRef.path); // DEBUG
-                
                 const q = window.firebase.query(cardsCollectionRef);
 
                 const unsubscribe = window.firebase.onSnapshot(q, (querySnapshot) => {
-                    console.log("ADMIN: Snapshot received. Document count:", querySnapshot.size); // DEBUG
                     const cardsData = [];
                     querySnapshot.forEach((doc) => {
-                        console.log("ADMIN:   => ", doc.id, doc.data()); // DEBUG
                         cardsData.push({ id: doc.id, ...doc.data() });
                     });
                     
                     cardsData.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
-
                     setCards(cardsData);
                     setLoading(false);
                 }, (error) => {
-                    console.error("ADMIN: Firestore snapshot error:", error); // DEBUG
+                    console.error("Firestore snapshot error:", error);
                     setLoading(false);
                 });
 
@@ -238,7 +234,6 @@ const analytics = getAnalytics(app);
 
             return (
                 <div className="w-full max-w-4xl mx-auto text-center p-4">
-                    <p className="text-xs text-gray-600 mb-4">Admin Panel - App ID: {window.appId}</p>
                     <h1 className="text-4xl font-bold text-cyan-400 mb-6">Admin Dashboard</h1>
                     <div className="bg-gray-800 rounded-lg shadow-xl p-4 overflow-x-auto">
                         <div className="grid grid-cols-2 font-bold text-gray-400 border-b border-gray-700 pb-2 mb-2">
@@ -289,21 +284,18 @@ const analytics = getAnalytics(app);
                 const cardNumbers = getShuffledNumbers(randomFunc, BINGO_MIN_NUMBER, BINGO_MAX_NUMBER).slice(0, 24);
                 const cardDocPath = `/artifacts/${window.appId}/public/data/equatino-cards/${newSeed}`;
                 
-                console.log("ORGANIZER: Writing to Firestore path:", cardDocPath); // DEBUG
-                
                 window.firebase.setDoc(window.firebase.doc(window.db, cardDocPath), {
                     seed: newSeed,
                     teamName: "",
                     cardNumbers: cardNumbers,
                     createdAt: window.firebase.serverTimestamp()
                 }).catch(error => {
-                    console.error("ORGANIZER: Error saving card to Firestore:", error); // DEBUG
+                    console.error("Error saving card to Firestore:", error);
                 });
             };
 
             return (
                 <div className="w-full max-w-md text-center">
-                     <p className="text-xs text-gray-600 mb-4">Organizer Panel - App ID: {window.appId}</p>
                     <h1 className="text-3xl font-bold text-cyan-400">Organizer Panel</h1>
                     <p className="text-gray-400 mb-6">Generate a unique QR code for participants</p>
                     <button onClick={handleGenerateLink} className="bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-3 px-8 rounded-lg shadow-lg">
@@ -351,11 +343,7 @@ const analytics = getAnalytics(app);
         // --- RENDER APPLICATION ---
         const renderApp = async () => {
             try {
-                if (window.initialAuthToken) {
-                    await window.firebase.signInWithCustomToken(window.auth, window.initialAuthToken);
-                } else {
-                    await window.firebase.signInAnonymously(window.auth);
-                }
+                await window.firebase.signInAnonymously(window.auth);
             } catch (error) {
                 console.error("Authentication failed:", error);
             }
@@ -363,7 +351,6 @@ const analytics = getAnalytics(app);
             root.render(<StrictMode><App /></StrictMode>);
         };
         
-        // Wait for firebase to be ready before rendering
         if (window.db) {
             renderApp();
         } else {
@@ -373,4 +360,3 @@ const analytics = getAnalytics(app);
     </script>
 </body>
 </html>
-
