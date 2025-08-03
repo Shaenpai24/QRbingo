@@ -134,7 +134,7 @@
 
         const ParticipantView = ({ seed }) => {
             const [cardNumbers, setCardNumbers] = useState([]);
-            const [markedIndices, setMarkedIndices] = useState(new Set([12])); // 12 is the center FREE space
+            const [markedIndices, setMarkedIndices] = useState(new Set([12]));
             const [isBingo, setIsBingo] = useState(false);
 
             useEffect(() => {
@@ -145,25 +145,18 @@
 
             const checkBingo = (currentMarks) => {
                 for (const combo of winningCombos) {
-                    if (combo.every(index => currentMarks.has(index))) {
-                        return true;
-                    }
+                    if (combo.every(index => currentMarks.has(index))) return true;
                 }
                 return false;
             };
 
             const toggleMark = (index) => {
-                if (isBingo) return; // Don't allow changes after bingo
+                if (isBingo) return;
                 const newMarks = new Set(markedIndices);
-                if (newMarks.has(index)) {
-                    newMarks.delete(index);
-                } else {
-                    newMarks.add(index);
-                }
+                if (newMarks.has(index)) newMarks.delete(index);
+                else newMarks.add(index);
                 setMarkedIndices(newMarks);
-                if (checkBingo(newMarks)) {
-                    setIsBingo(true);
-                }
+                if (checkBingo(newMarks)) setIsBingo(true);
             };
             
             const renderCell = (cellIndex) => {
@@ -194,7 +187,7 @@
                     <div className="fade-in grid grid-cols-5 gap-2 bg-gray-800 p-3 rounded-lg shadow-2xl w-full aspect-square">
                         {Array.from({ length: 25 }).map((_, i) => renderCell(i))}
                     </div>
-                    <p className="text-gray-500 text-xs mt-4">Card ID: <span id="card-id">{seed}</span></p>
+                    <p className="text-gray-500 text-xs mt-4">Card ID: <span>{seed}</span></p>
                 </div>
             );
         };
@@ -205,24 +198,24 @@
 
             useEffect(() => {
                 const cardsCollectionRef = window.firebase.collection(window.db, `/artifacts/${window.appId}/public/data/equatino-cards`);
+                console.log("ADMIN: Reading from Firestore path:", cardsCollectionRef.path); // DEBUG
                 
-                // ROBUST QUERY: Removed orderBy to prevent index-related issues.
-                // We will sort the data on the client-side after fetching.
                 const q = window.firebase.query(cardsCollectionRef);
 
                 const unsubscribe = window.firebase.onSnapshot(q, (querySnapshot) => {
+                    console.log("ADMIN: Snapshot received. Document count:", querySnapshot.size); // DEBUG
                     const cardsData = [];
                     querySnapshot.forEach((doc) => {
+                        console.log("ADMIN:   => ", doc.id, doc.data()); // DEBUG
                         cardsData.push({ id: doc.id, ...doc.data() });
                     });
                     
-                    // Client-side sorting to show newest cards first
                     cardsData.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
 
                     setCards(cardsData);
                     setLoading(false);
                 }, (error) => {
-                    console.error("Firestore snapshot error:", error);
+                    console.error("ADMIN: Firestore snapshot error:", error); // DEBUG
                     setLoading(false);
                 });
 
@@ -231,14 +224,14 @@
 
             const handleTeamNameChange = (cardId, newName) => {
                 const cardDocPath = `/artifacts/${window.appId}/public/data/equatino-cards/${cardId}`;
-                const docRef = window.firebase.doc(window.db, cardDocPath);
-                window.firebase.updateDoc(docRef, { teamName: newName });
+                window.firebase.updateDoc(window.firebase.doc(window.db, cardDocPath), { teamName: newName });
             };
             
             if (loading) return <div>Loading Admin Panel...</div>;
 
             return (
                 <div className="w-full max-w-4xl mx-auto text-center p-4">
+                    <p className="text-xs text-gray-600 mb-4">Admin Panel - App ID: {window.appId}</p>
                     <h1 className="text-4xl font-bold text-cyan-400 mb-6">Admin Dashboard</h1>
                     <div className="bg-gray-800 rounded-lg shadow-xl p-4 overflow-x-auto">
                         <div className="grid grid-cols-2 font-bold text-gray-400 border-b border-gray-700 pb-2 mb-2">
@@ -289,18 +282,21 @@
                 const cardNumbers = getShuffledNumbers(randomFunc, BINGO_MIN_NUMBER, BINGO_MAX_NUMBER).slice(0, 24);
                 const cardDocPath = `/artifacts/${window.appId}/public/data/equatino-cards/${newSeed}`;
                 
+                console.log("ORGANIZER: Writing to Firestore path:", cardDocPath); // DEBUG
+                
                 window.firebase.setDoc(window.firebase.doc(window.db, cardDocPath), {
                     seed: newSeed,
                     teamName: "",
                     cardNumbers: cardNumbers,
                     createdAt: window.firebase.serverTimestamp()
                 }).catch(error => {
-                    console.error("Error saving card to Firestore:", error);
+                    console.error("ORGANIZER: Error saving card to Firestore:", error); // DEBUG
                 });
             };
 
             return (
                 <div className="w-full max-w-md text-center">
+                     <p className="text-xs text-gray-600 mb-4">Organizer Panel - App ID: {window.appId}</p>
                     <h1 className="text-3xl font-bold text-cyan-400">Organizer Panel</h1>
                     <p className="text-gray-400 mb-6">Generate a unique QR code for participants</p>
                     <button onClick={handleGenerateLink} className="bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-3 px-8 rounded-lg shadow-lg">
