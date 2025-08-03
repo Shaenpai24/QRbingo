@@ -58,7 +58,7 @@
     <!-- Firebase Imports -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getFirestore, doc, setDoc, onSnapshot, collection, updateDoc, serverTimestamp, query } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, doc, setDoc, onSnapshot, collection, updateDoc, serverTimestamp, query, orderBy } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         
         // --- DO NOT EDIT: These are automatically provided by the environment ---
@@ -76,7 +76,7 @@
         window.appId = appId;
         window.initialAuthToken = initialAuthToken;
         window.firebase = {
-            doc, setDoc, onSnapshot, collection, updateDoc, serverTimestamp, query,
+            doc, setDoc, onSnapshot, collection, updateDoc, serverTimestamp, query, orderBy,
             signInAnonymously, signInWithCustomToken
         };
         
@@ -204,20 +204,24 @@
             const [loading, setLoading] = useState(true);
 
             useEffect(() => {
-                // CORRECTED PATH: This now correctly points to the collection of cards.
                 const cardsCollectionRef = window.firebase.collection(window.db, `/artifacts/${window.appId}/public/data/equatino-cards`);
-                const q = window.firebase.query(cardsCollectionRef);
+                
+                // FIXED QUERY: Explicitly order by 'createdAt' in descending order.
+                // This ensures Firestore uses the correct index and returns results as expected.
+                const q = window.firebase.query(cardsCollectionRef, window.firebase.orderBy("createdAt", "desc"));
 
                 const unsubscribe = window.firebase.onSnapshot(q, (querySnapshot) => {
                     const cardsData = [];
                     querySnapshot.forEach((doc) => {
                         cardsData.push({ id: doc.id, ...doc.data() });
                     });
-                    // Sort by creation time to show newest cards first
-                    cardsData.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
                     setCards(cardsData);
                     setLoading(false);
+                }, (error) => {
+                    console.error("Firestore snapshot error:", error);
+                    setLoading(false);
                 });
+
                 return () => unsubscribe();
             }, []);
 
@@ -259,12 +263,11 @@
             const [generatedUrl, setGeneratedUrl] = useState('');
             const [showQr, setShowQr] = useState(false);
 
-            // This effect runs whenever 'generatedUrl' changes to create the QR code.
             useEffect(() => {
                 if (generatedUrl) {
                     const qrcodeDiv = document.getElementById('qrcode');
                     if (qrcodeDiv) {
-                        qrcodeDiv.innerHTML = ''; // Clear previous QR code
+                        qrcodeDiv.innerHTML = ''; 
                         new QRCode(qrcodeDiv, { text: generatedUrl, width: 256, height: 256 });
                     }
                 }
@@ -275,11 +278,9 @@
                 const baseUrl = window.location.href.split('?')[0];
                 const newUrl = `${baseUrl}?seed=${newSeed}`;
 
-                // --- STATE UPDATE (triggers UI change) ---
                 setGeneratedUrl(newUrl);
                 setShowQr(true);
 
-                // --- DATABASE WRITE IN BACKGROUND ---
                 const randomFunc = createSeededRandom(newSeed);
                 const cardNumbers = getShuffledNumbers(randomFunc, BINGO_MIN_NUMBER, BINGO_MAX_NUMBER).slice(0, 24);
                 const cardDocPath = `/artifacts/${window.appId}/public/data/equatino-cards/${newSeed}`;
