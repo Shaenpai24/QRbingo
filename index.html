@@ -252,28 +252,36 @@
         };
 
         const OrganizerView = () => {
-            const handleGenerateLink = async () => {
+            const handleGenerateLink = () => {
                 const newSeed = Math.random().toString(36).substring(2, 10);
                 const baseUrl = window.location.href.split('?')[0];
                 const newUrl = `${baseUrl}?seed=${newSeed}`;
 
-                // Create document in Firestore
-                const randomFunc = createSeededRandom(newSeed);
-                const cardNumbers = getShuffledNumbers(randomFunc, BINGO_MIN_NUMBER, BINGO_MAX_NUMBER).slice(0, 24);
-                const cardDocPath = `/artifacts/${window.appId}/public/data/equatino-cards/${newSeed}`;
-                await window.firebase.setDoc(window.firebase.doc(window.db, cardDocPath), {
-                    seed: newSeed,
-                    teamName: "",
-                    cardNumbers: cardNumbers,
-                    createdAt: window.firebase.serverTimestamp()
-                });
-
-                // Update UI
+                // --- OPTIMISTIC UI UPDATE ---
+                // Instantly show the QR code and link to the user.
                 document.getElementById('generated-link').value = newUrl;
                 const qrcodeDiv = document.getElementById('qrcode');
                 qrcodeDiv.innerHTML = '';
                 new QRCode(qrcodeDiv, { text: newUrl, width: 256, height: 256 });
                 document.getElementById('qr-code-container').classList.remove('hidden');
+
+                // --- DATABASE WRITE IN BACKGROUND ---
+                // Now, do the database work without making the user wait.
+                const randomFunc = createSeededRandom(newSeed);
+                const cardNumbers = getShuffledNumbers(randomFunc, BINGO_MIN_NUMBER, BINGO_MAX_NUMBER).slice(0, 24);
+                const cardDocPath = `/artifacts/${window.appId}/public/data/equatino-cards/${newSeed}`;
+                
+                // We don't 'await' this promise, so the UI is not blocked.
+                // It runs in the background.
+                window.firebase.setDoc(window.firebase.doc(window.db, cardDocPath), {
+                    seed: newSeed,
+                    teamName: "",
+                    cardNumbers: cardNumbers,
+                    createdAt: window.firebase.serverTimestamp()
+                }).catch(error => {
+                    console.error("Error saving card to Firestore:", error);
+                    // Optionally, you could show an error to the organizer here.
+                });
             };
 
             return (
