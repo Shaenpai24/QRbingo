@@ -347,8 +347,7 @@
             } catch (error) {
                 console.error("Authentication failed:", error);
             }
-            const root = ReactDOM.createRoot(document.getElementById('root'));
-            root.render(<StrictMode><App /></StrictMode>);
+            ReactDOM.render(<StrictMode><App /></StrictMode>, document.getElementById('root'));
         };
         
         if (window.db) {
@@ -360,3 +359,4 @@
     </script>
 </body>
 </html>
+
