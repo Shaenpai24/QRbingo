@@ -206,15 +206,19 @@
             useEffect(() => {
                 const cardsCollectionRef = window.firebase.collection(window.db, `/artifacts/${window.appId}/public/data/equatino-cards`);
                 
-                // FIXED QUERY: Explicitly order by 'createdAt' in descending order.
-                // This ensures Firestore uses the correct index and returns results as expected.
-                const q = window.firebase.query(cardsCollectionRef, window.firebase.orderBy("createdAt", "desc"));
+                // ROBUST QUERY: Removed orderBy to prevent index-related issues.
+                // We will sort the data on the client-side after fetching.
+                const q = window.firebase.query(cardsCollectionRef);
 
                 const unsubscribe = window.firebase.onSnapshot(q, (querySnapshot) => {
                     const cardsData = [];
                     querySnapshot.forEach((doc) => {
                         cardsData.push({ id: doc.id, ...doc.data() });
                     });
+                    
+                    // Client-side sorting to show newest cards first
+                    cardsData.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+
                     setCards(cardsData);
                     setLoading(false);
                 }, (error) => {
