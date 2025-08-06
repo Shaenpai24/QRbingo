@@ -137,7 +137,7 @@
             { id: 10, text: "Ten years ago, a father was 4 times as old as his son. Their current age difference is 21 years. Find the son's age.", correctAnswer: "17", hint: "Set up two linear equations with two variables." },
             { id: 11, text: "In a pie chart representing monthly expenses, 72° is allocated to groceries. What percentage of total expenditure is it?", correctAnswer: "20", hint: "A full circle is 360°. The percentage is (72/360) * 100." },
             { id: 12, text: "The lateral surface area of a cylinder is 176π sq units. If its height is 8 units, what is its radius?", correctAnswer: "11", hint: "Lateral surface area of a cylinder is 2πrh." },
-            { id: 13, text: "A sphere has a volume of (16384 * π)/3 cubic units. Find its radius.", correctAnswer: "16", hint: "Volume of a sphere is (4/3)πr³." },
+            { id: 13, text: "A sphere has a volume of (16384 * π)/3 cubic units. What is its radius?", correctAnswer: "16", hint: "Volume of a sphere is (4/3)πr³." },
             { id: 14, text: "In a right angled triangle, sin A = 3/5; find the value of (sec A + tan A)²", correctAnswer: "4", hint: "Find cos(A) and tan(A) using the Pythagorean identity." },
             { id: 15, text: "Evaluate: (log 50 10/ log 5 10)- log 2 5", correctAnswer: "2", hint: "Consider the change of base formula for logarithms." },
             { id: 16, text: "Evaluate: (((6÷3)+(4−2))×2)÷8", correctAnswer: "1", hint: "Follow the order of operations (PEMDAS/BODMAS)." },
@@ -370,23 +370,10 @@
             );
         };
         
-        const GameControlPanel = ({ onResetGame, isResetting }) => {
-            const [gameState, setGameState] = useState({ questionIndex: -1 });
+        const GameControlPanel = ({ gameState, onResetGame, isResetting }) => {
             const [timeLeft, setTimeLeft] = useState(0);
 
             useEffect(() => {
-                const gameStateRef = window.firebase.doc(window.db, `/artifacts/${window.appId}/public/data/game-state/current`);
-                const unsubscribe = window.firebase.onSnapshot(gameStateRef, (doc) => {
-                    if(doc.exists()) {
-                        setGameState(doc.data());
-                    } else {
-                        setGameState({ activeQuestionId: null, questionIndex: -1, isTimerRunning: false });
-                    }
-                });
-                return () => unsubscribe();
-            }, []);
-
-             useEffect(() => {
                 if (gameState && gameState.isTimerRunning && gameState.endTime) {
                     const updateTimer = () => {
                         const now = Date.now();
@@ -467,7 +454,7 @@
         const AdminView = () => {
             const [cards, setCards] = useState([]);
             const [loading, setLoading] = useState(true);
-            const [gameState, setGameState] = useState({});
+            const [gameState, setGameState] = useState({ questionIndex: -1 });
             const [confirmingDelete, setConfirmingDelete] = useState(null);
             const [confirmingReset, setConfirmingReset] = useState(false);
 
@@ -486,7 +473,11 @@
 
                 const gameStateRef = window.firebase.doc(window.db, `/artifacts/${window.appId}/public/data/game-state/current`);
                 const unsubscribeGameState = window.firebase.onSnapshot(gameStateRef, (doc) => {
-                    if (doc.exists()) setGameState(doc.data());
+                    if (doc.exists()) {
+                        setGameState(doc.data());
+                    } else {
+                        setGameState({ questionIndex: -1 });
+                    }
                 });
 
                 return () => { unsubscribeCards(); unsubscribeGameState(); };
@@ -535,7 +526,7 @@
             return (
                 <div className="w-full max-w-7xl mx-auto text-center p-4">
                     <h1 className="text-4xl font-bold text-cyan-400 mb-6">Admin Dashboard</h1>
-                    <GameControlPanel onResetGame={handleResetGame} isResetting={confirmingReset} />
+                    <GameControlPanel gameState={gameState} onResetGame={handleResetGame} isResetting={confirmingReset} />
                     {cards.length === 0 && <p className="text-gray-500 py-4 bg-gray-800 rounded-lg">No cards have been generated yet.</p>}
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                         {cards.map(card => {
@@ -593,13 +584,13 @@
                  setShowQr(true);
 
                  const randomFunc = createSeededRandom(newSeed);
-                 const allQuestionNumbers = QUESTIONS_DATA.map(q => Number(q.correctAnswer));
+                 const allAnswerKeys = QUESTIONS_DATA.map(q => Number(q.correctAnswer));
                  
-                 for (let i = allQuestionNumbers.length - 1; i > 0; i--) {
+                 for (let i = allAnswerKeys.length - 1; i > 0; i--) {
                     const j = randomFunc() % (i + 1);
-                    [allQuestionNumbers[i], allQuestionNumbers[j]] = [allQuestionNumbers[j], allQuestionNumbers[i]];
+                    [allAnswerKeys[i], allAnswerKeys[j]] = [allAnswerKeys[j], allAnswerKeys[i]];
                  }
-                 const cardNumbers = allQuestionNumbers.slice(0, 25);
+                 const cardNumbers = allAnswerKeys.slice(0, 25);
 
                  const cardDocPath = `/artifacts/${window.appId}/public/data/equatino-cards/${newSeed}`;
                  
