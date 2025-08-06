@@ -113,40 +113,36 @@
         const { useState, useEffect, StrictMode, useRef } = React;
 
         // --- GAME CONFIGURATION AND DATA ---
-        const BINGO_MAX_NUMBER = 30;
+        const BINGO_MAX_NUMBER = 25; // Updated to 25 questions
         const QUESTION_TIME_LIMIT = 120;
 
+        // --- Final, Shuffled Question Bank ---
         const QUESTIONS_DATA = [
-            { id: 1, text: "In a room of 10 people, if everyone shakes hands with everyone else exactly once, how many handshakes occur in total?", correctAnswer: "45" },
-            { id: 2, text: "What is the next number in the sequence: 1, 4, 9, 16, 25, ...?", correctAnswer: "36" },
-            { id: 3, text: "If f(x) = x^2 + 2x, what is the value of f'(1)?", correctAnswer: "4" },
-            { id: 4, text: "What is the value of the imaginary unit i raised to the power of 100? (i^100)", correctAnswer: "1" },
-            { id: 5, text: "A single six-sided die is rolled. What is the probability of rolling a number greater than 4? (Enter as a fraction, e.g., 1/3)", correctAnswer: "1/3" },
-            { id: 6, text: "A father's age is currently three times his son's age. Four years ago, he was four times as old as his son. What is the father's current age?", correctAnswer: "36" },
-            { id: 7, text: "What is the value of the definite integral of 2x from 0 to 1?", correctAnswer: "1" },
-            { id: 8, text: "Which famous mathematician is credited with the invention of the coordinate system?", correctAnswer: "Descartes" },
-            { id: 9, text: "If a circle has a radius of 5 units, what is its area? (Enter number only, e.g., 25pi)", correctAnswer: "25pi" },
-            { id: 10, text: "What is the determinant of the matrix [[3, 1], [4, 2]]?", correctAnswer: "2" },
-            { id: 11, text: "What is the angle in degrees between the hour and minute hands of a clock at 3:00?", correctAnswer: "90" },
-            { id: 12, text: "If log base 10 of x = 2, what is the value of x?", correctAnswer: "100" },
-            { id: 13, text: "The value of sin^2(theta) + cos^2(theta) is always:", correctAnswer: "1" },
-            { id: 14, text: "How many ways can you arrange the letters of the word 'MATH'?", correctAnswer: "24" },
-            { id: 15, text: "Find the slope of the line passing through the points (1, 2) and (3, 6).", correctAnswer: "2" },
-            { id: 16, text: "What is the approximate value of the golden ratio, phi, to 3 decimal places?", correctAnswer: "1.618" },
-            { id: 17, text: "A bag has 5 red and 3 blue balls. What is the probability of picking a blue ball? (Enter as fraction e.g. 3/8)", correctAnswer: "3/8" },
-            { id: 18, text: "What is the next term in the 'Look-and-Say' sequence: 1, 11, 21, 1211, ...?", correctAnswer: "111221" },
-            { id: 19, text: "What is the sum of the first 10 positive integers (1+2+...+10)?", correctAnswer: "55" },
-            { id: 20, text: "What is the dot product of the vectors 2i + 3j and 4i - 2j?", correctAnswer: "2" },
-            { id: 21, text: "A farmer has 17 sheep. All but 9 die. How many are left?", correctAnswer: "9" },
-            { id: 22, text: "The eccentricity of any circle is always:", correctAnswer: "0" },
-            { id: 23, text: "If A+B=5 and A-B=1, what is the value of A?", correctAnswer: "3" },
-            { id: 24, text: "What is the smallest prime number?", correctAnswer: "2" },
-            { id: 25, text: "The general solution of the differential equation dy/dx = 1 is y = x + C. What letter represents the constant of integration?", correctAnswer: "C" },
-            { id: 26, text: "A triangle has angles 30, 60, and 90 degrees. What is this type of triangle called?", correctAnswer: "Right-angled" },
-            { id: 27, text: "The value of 0! (zero factorial) is:", correctAnswer: "1" },
-            { id: 28, text: "If you flip a fair coin twice, what is the probability of getting two heads (HH)? (Enter as fraction e.g. 1/4)", correctAnswer: "1/4" },
-            { id: 29, text: "What is the sum of the angles in any triangle, in degrees?", correctAnswer: "180" },
-            { id: 30, text: "In the puzzle ME + ME = BEE, what number does 'E' represent?", correctAnswer: "9" }
+            { id: 1, text: "A number exceeds 4/7 of itself by 12. What is the number?", correctAnswer: "28" },
+            { id: 2, text: "In a right angled triangle, sin A = 3/5; find the value of (sec A + tan A)²", correctAnswer: "4" },
+            { id: 3, text: "Find the number which is twice of a 2-digit palindrome and also itself a palindrome.", correctAnswer: "22" },
+            { id: 4, text: "Solve for x: 3^(x-18) = 243", correctAnswer: "23" },
+            { id: 5, text: "Find the smallest number that leaves a remainder of 1 when divided by 3, 4, 5, and 6.", correctAnswer: "13" },
+            { id: 6, text: "A cube has a volume of 512 cubic units. What is the length of one edge?", correctAnswer: "8" },
+            { id: 7, text: "If log₃(x)=2, find the value of log₃(x³) + log₃(x¹/²)", correctAnswer: "7" },
+            { id: 8, text: "The number of sides in a regular dodecagon minus 3 equals?", correctAnswer: "9" },
+            { id: 9, text: "Solve: ((2 x sin 60°) / (cos 30°)) + cot 45°", correctAnswer: "3" },
+            { id: 10, text: "A sphere has a volume of (16384 π)/3 cubic units. Find its radius.", correctAnswer: "16" },
+            { id: 11, text: "Find the mean of 832, 1024, 1100, 900, 756, 980, 1040, 870, 998, 3500 and divide the result by 100.", correctAnswer: "12" },
+            { id: 12, text: "How many distinct positive divisors does 60 have?", correctAnswer: "6" },
+            { id: 13, text: "The sum of digits of a two-digit number is 9. If the digits are reversed, the number increases by 27. Find the original number.", correctAnswer: "18" },
+            { id: 14, text: "A bag contains 2 red balls, 5 blue balls, and 8 green balls. If you draw 1 red and 1 blue ball, in how many ways can you do this?", correctAnswer: "10" },
+            { id: 15, text: "Evaluate: (((6÷3)+(4−2))×2)÷8", correctAnswer: "1" },
+            { id: 16, text: "Compute the determinant of the matrix [[2, 3, 1], [4, 1, 2], [1, 2, 3]] and remove the negative sign from the result.", correctAnswer: "25" },
+            { id: 17, text: "The lateral surface area of a cylinder is 176π sq units. If its height is 8 units, what is its radius?", correctAnswer: "11" },
+            { id: 18, text: "Ten years ago, a father was 4 times as old as his son. Their current age difference is 21 years. Find the son's age.", correctAnswer: "17" },
+            { id: 19, text: "Find the focal length of a parabola y² = 20x.", correctAnswer: "5" },
+            { id: 20, text: "A 7-sided polygon (heptagon) has how many diagonals?", correctAnswer: "14" },
+            { id: 21, text: "In a pie chart representing monthly expenses, 72° is allocated to groceries. What percentage of total expenditure is it?", correctAnswer: "20" },
+            { id: 22, text: "Evaluate: (log₅₀ 10 / log₅ 10) - log₂ 5", correctAnswer: "2" },
+            { id: 23, text: "Find the value of 5 x sin 30° x cosec 30° x tan 60° x cot 30°", correctAnswer: "15" },
+            { id: 24, text: "A library has 95,000 books, out of which 0.02% are rare ancient manuscripts. How many rare manuscripts are there?", correctAnswer: "19" },
+            { id: 25, text: "Solve for x: x³−63x²+945x−3969=0 (The root is between 14 to 25, both not inclusive)", correctAnswer: "21" }
         ];
 
         const winningCombos = [
