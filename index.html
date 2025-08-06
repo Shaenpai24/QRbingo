@@ -24,7 +24,6 @@
         }
         .fade-in { animation: fadeIn 0.5s ease-out forwards; }
         .bingo-cell {
-            cursor: pointer;
             user-select: none;
             transition: all 0.2s ease-in-out;
         }
@@ -34,15 +33,13 @@
             color: #ffffff;
             font-weight: 900;
         }
-        /* Styles for the smaller admin cards */
         .admin-card .bingo-cell {
             font-size: 0.7rem;
             line-height: 1;
             font-weight: bold;
-            cursor: default;
         }
         .admin-card .bingo-cell.marked {
-             background-color: #f59e0b; /* Amber color for admin view */
+             background-color: #f59e0b;
         }
         @keyframes bingo-animation {
             0% { transform: scale(0.5) rotate(-10deg); opacity: 0; }
@@ -60,15 +57,22 @@
             text-shadow: 0 0 10px #fff, 0 0 20px #22d3ee;
             animation: bingo-animation 0.7s cubic-bezier(0.25, 0.46, 0.45, 0.94) both;
         }
+        .question-modal {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1000;
+            animation: fadeIn 0.3s ease-out;
+        }
     </style>
 </head>
 <body>
     <div id="root"></div>
 
-    <!-- Firebase Imports -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getFirestore, doc, setDoc, onSnapshot, collection, updateDoc, serverTimestamp, query } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, doc, setDoc, onSnapshot, collection, updateDoc, serverTimestamp, query, writeBatch, deleteDoc, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         
         const firebaseConfig = {
@@ -90,7 +94,7 @@
         window.auth = auth;
         window.appId = appId;
         window.firebase = {
-            doc, setDoc, onSnapshot, collection, updateDoc, serverTimestamp, query,
+            doc, setDoc, onSnapshot, collection, updateDoc, serverTimestamp, query, writeBatch, deleteDoc, getDocs,
             signInAnonymously
         };
         
@@ -98,12 +102,29 @@
     </script>
 
     <script type="text/babel">
-        const { useState, useEffect, StrictMode } = React;
+        const { useState, useEffect, StrictMode, useRef } = React;
 
+        // --- GAME CONFIGURATION AND DATA ---
         const BINGO_MIN_NUMBER = 1;
-        const BINGO_MAX_NUMBER = 75;
+        const BINGO_MAX_NUMBER = 30; // Using 30 questions
         const GRID_SIZE = 5;
+        const QUESTION_TIME_LIMIT = 120; // 2 minutes in seconds
 
+        // --- Central Question Bank ---
+        const QUESTIONS_DATA = Array.from({ length: 30 }, (_, i) => ({
+            id: i + 1,
+            text: `This is the question for number ${i + 1}. What is the correct option?`,
+            options: { A: `Option A for ${i + 1}`, B: `Option B for ${i + 1}`, C: `Option C for ${i + 1}`, D: `Option D for ${i + 1}`},
+            correctKey: 'A' // For demo, all answers are 'A'
+        }));
+
+        const winningCombos = [
+            [0,1,2,3,4], [5,6,7,8,9], [10,11,12,13,14], [15,16,17,18,19], [20,21,22,23,24],
+            [0,5,10,15,20], [1,6,11,16,21], [2,7,12,17,22], [3,8,13,18,23], [4,9,14,19,24],
+            [0,6,12,18,24], [4,8,12,16,20]
+        ];
+
+        // --- HELPER FUNCTIONS ---
         function createSeededRandom(seed) {
             let h = 1779033703 ^ seed.length;
             for (let i = 0; i < seed.length; i++) {
@@ -116,7 +137,6 @@
                 return (h ^= h >>> 16) >>> 0;
             }
         }
-
         function getShuffledNumbers(randomFunc, min, max) {
             const allNumbers = Array.from({ length: max - min + 1 }, (_, i) => i + min);
             for (let i = allNumbers.length - 1; i > 0; i--) {
@@ -125,108 +145,232 @@
             }
             return allNumbers;
         }
-        
-        const winningCombos = [
-            [0,1,2,3,4], [5,6,7,8,9], [10,11,12,13,14], [15,16,17,18,19], [20,21,22,23,24],
-            [0,5,10,15,20], [1,6,11,16,21], [2,7,12,17,22], [3,8,13,18,23], [4,9,14,19,24],
-            [0,6,12,18,24], [4,8,12,16,20]
-        ];
 
-        const BingoAnimation = () => (
-            <div className="bingo-overlay fade-in">
-                <div className="bingo-text">BINGO!</div>
-            </div>
-        );
+        // --- SHARED COMPONENTS ---
+        const BingoAnimation = () => ( <div className="bingo-overlay fade-in"><div className="bingo-text">BINGO!</div></div> );
 
-        const ParticipantView = ({ seed }) => {
-            const [cardNumbers, setCardNumbers] = useState([]);
-            const [markedIndices, setMarkedIndices] = useState(new Set([12]));
-            const [isBingo, setIsBingo] = useState(false);
-
-            useEffect(() => {
-                const randomFunc = createSeededRandom(seed);
-                const shuffled = getShuffledNumbers(randomFunc, BINGO_MIN_NUMBER, BINGO_MAX_NUMBER);
-                setCardNumbers(shuffled.slice(0, GRID_SIZE * GRID_SIZE - 1));
-            }, [seed]);
-
-            const updateFirestoreMarks = (marksSet) => {
-                const cardDocPath = `/artifacts/${window.appId}/public/data/equatino-cards/${seed}`;
-                const docRef = window.firebase.doc(window.db, cardDocPath);
-                // Convert Set to Array for Firestore compatibility
-                const marksArray = Array.from(marksSet);
-                window.firebase.updateDoc(docRef, { markedIndices: marksArray });
-            };
-
-            const checkBingo = (currentMarks) => {
-                for (const combo of winningCombos) {
-                    if (combo.every(index => currentMarks.has(index))) return true;
-                }
-                return false;
-            };
-
-            const toggleMark = (index) => {
-                if (isBingo) return;
-                const newMarks = new Set(markedIndices);
-                if (newMarks.has(index)) newMarks.delete(index);
-                else newMarks.add(index);
-                
-                setMarkedIndices(newMarks);
-                updateFirestoreMarks(newMarks); // Update Firestore on change
-                
-                if (checkBingo(newMarks)) setIsBingo(true);
-            };
-            
-            const renderCell = (cellIndex) => {
-                const isCenter = cellIndex === 12;
-                const number = isCenter ? "FREE" : cardNumbers[cellIndex > 12 ? cellIndex - 1 : cellIndex];
-                const isMarked = markedIndices.has(cellIndex);
-
-                return (
-                    <div 
-                        key={cellIndex}
-                        className={`bingo-cell flex items-center justify-center text-xl md:text-2xl font-bold rounded-md bg-gray-900 aspect-square ${isMarked ? 'marked' : ''}`}
-                        onClick={() => toggleMark(cellIndex)}
-                    >
-                        {number}
-                    </div>
-                );
-            };
-
-            if (cardNumbers.length === 0) return <div>Loading Card...</div>;
-
+        // --- PARTICIPANT VIEW ---
+        const QuestionModal = ({ question, timeLeft, activeQuestionId }) => {
+            if (!question) return null;
+            const progress = (timeLeft / QUESTION_TIME_LIMIT) * 100;
             return (
-                <div className="w-full max-w-md text-center">
-                    {isBingo && <BingoAnimation />}
-                    <div className="mb-4">
-                        <h1 className="text-5xl font-black tracking-tight text-cyan-400">Equatino!</h1>
-                        <p className="text-gray-400 mt-1">Tap the squares you solve!</p>
+                <div className="question-modal w-11/12 max-w-2xl bg-gray-900 border-2 border-cyan-500 rounded-lg p-6 shadow-2xl">
+                    <h2 className="text-xl font-bold text-cyan-400 mb-2">Question #{activeQuestionId} is Active!</h2>
+                    <p className="text-lg mb-4">{question.text}</p>
+                    <ul className="list-none mb-4 space-y-2">
+                        {Object.entries(question.options).map(([key, value]) => (
+                            <li key={key}><span className="font-bold text-cyan-400 mr-2">{key}:</span>{value}</li>
+                        ))}
+                    </ul>
+                    <div className="w-full bg-gray-700 rounded-full h-2.5">
+                       <div className="bg-cyan-500 h-2.5 rounded-full" style={{ width: `${progress}%`, transition: 'width 0.5s linear' }}></div>
                     </div>
-                    <div className="fade-in grid grid-cols-5 gap-2 bg-gray-800 p-3 rounded-lg shadow-2xl w-full aspect-square">
-                        {Array.from({ length: 25 }).map((_, i) => renderCell(i))}
-                    </div>
-                    <p className="text-gray-500 text-xs mt-4">Card ID: <span>{seed}</span></p>
+                    <p className="text-center text-sm font-bold mt-2">{timeLeft}s remaining</p>
                 </div>
             );
         };
         
-        const AdminBingoCard = ({ numbers, markedIndices }) => {
-            const markedSet = new Set(markedIndices || [12]);
+        const ParticipantView = ({ seed }) => {
+            const [card, setCard] = useState(null);
+            const [gameState, setGameState] = useState({});
+            const [isBingo, setIsBingo] = useState(false);
+            const [timeLeft, setTimeLeft] = useState(0);
+
+            useEffect(() => {
+                const cardDocRef = window.firebase.doc(window.db, `/artifacts/${window.appId}/public/data/equatino-cards/${seed}`);
+                const unsubscribeCard = window.firebase.onSnapshot(cardDocRef, (doc) => {
+                    if (doc.exists()) setCard(doc.data());
+                });
+
+                const gameStateRef = window.firebase.doc(window.db, `/artifacts/${window.appId}/public/data/game-state/current`);
+                const unsubscribeGameState = window.firebase.onSnapshot(gameStateRef, (doc) => {
+                    if (doc.exists()) setGameState(doc.data());
+                });
+
+                return () => {
+                    unsubscribeCard();
+                    unsubscribeGameState();
+                };
+            }, [seed]);
+
+            useEffect(() => {
+                if (gameState.endTime) {
+                    const updateTimer = () => {
+                        const now = Date.now();
+                        const end = gameState.endTime.toDate().getTime();
+                        const secondsLeft = Math.max(0, Math.floor((end - now) / 1000));
+                        setTimeLeft(secondsLeft);
+                        if (secondsLeft === 0) clearInterval(timerInterval);
+                    };
+                    updateTimer(); // Initial call
+                    const timerInterval = setInterval(updateTimer, 1000);
+                    return () => clearInterval(timerInterval);
+                }
+            }, [gameState.endTime]);
+
+            useEffect(() => {
+                if (card?.markedIndices) {
+                    const markedSet = new Set(card.markedIndices);
+                    if (winningCombos.some(combo => combo.every(index => markedSet.has(index)))) {
+                        setIsBingo(true);
+                    } else {
+                        setIsBingo(false);
+                    }
+                }
+            }, [card?.markedIndices]);
+
+            const handleSubmitAnswer = async (questionId, submittedKey) => {
+                if (!submittedKey || card.attempts?.[questionId]) return; // Already attempted
+
+                const question = QUESTIONS_DATA.find(q => q.id === questionId);
+                const isCorrect = question.correctKey.toUpperCase() === submittedKey.toUpperCase();
+                
+                const cardDocRef = window.firebase.doc(window.db, `/artifacts/${window.appId}/public/data/equatino-cards/${seed}`);
+                const newMarks = new Set(card.markedIndices);
+                if (isCorrect) {
+                    const cellIndex = card.cardNumbers.findIndex(n => n === questionId);
+                    if (cellIndex !== -1) {
+                        const gridIndex = cellIndex >= 12 ? cellIndex + 1 : cellIndex;
+                        newMarks.add(gridIndex);
+                    }
+                }
+
+                await window.firebase.updateDoc(cardDocRef, {
+                    [`attempts.${questionId}`]: submittedKey.toUpperCase(),
+                    markedIndices: Array.from(newMarks)
+                });
+            };
 
             const renderCell = (cellIndex) => {
                 const isCenter = cellIndex === 12;
-                const number = isCenter ? "★" : numbers[cellIndex > 12 ? cellIndex - 1 : cellIndex];
-                const isMarked = markedSet.has(cellIndex);
+                if (isCenter) return <div key={cellIndex} className="bingo-cell marked flex items-center justify-center">★</div>;
+
+                const number = card.cardNumbers[cellIndex > 12 ? cellIndex - 1 : cellIndex];
+                const isMarked = card.markedIndices?.includes(cellIndex);
+                const isActive = gameState.activeQuestionId === number && timeLeft > 0;
+                const wasAttempted = card.attempts?.[number];
+
+                if (isMarked) {
+                    return <div key={cellIndex} className="bingo-cell marked flex items-center justify-center text-xl md:text-2xl font-bold rounded-md">{number}</div>;
+                }
                 
-                return (
-                    <div key={cellIndex} className={`bingo-cell flex items-center justify-center rounded bg-gray-700 aspect-square ${isMarked ? 'marked' : ''}`}>
-                        {number}
+                if (isActive && !wasAttempted) {
+                    return (
+                        <form key={cellIndex} onSubmit={(e) => { e.preventDefault(); handleSubmitAnswer(number, e.target.answer.value); }}>
+                            <input
+                                name="answer"
+                                type="text"
+                                maxLength="1"
+                                className="w-full h-full bg-cyan-200 text-gray-900 text-3xl font-bold text-center rounded-md focus:outline-none focus:ring-4 ring-cyan-500"
+                                autoFocus
+                            />
+                        </form>
+                    );
+                }
+
+                const cellColor = wasAttempted ? 'bg-gray-700 text-gray-500' : 'bg-gray-900';
+                return <div key={cellIndex} className={`bingo-cell flex items-center justify-center text-xl md:text-2xl font-bold rounded-md ${cellColor}`}>{number}</div>;
+            };
+            
+            if (!card) return <div>Loading Card...</div>;
+
+            return (
+                <div className="w-full max-w-md mx-auto text-center">
+                    {isBingo && <BingoAnimation />}
+                    <QuestionModal question={QUESTIONS_DATA.find(q => q.id === gameState.activeQuestionId)} timeLeft={timeLeft} activeQuestionId={gameState.activeQuestionId} />
+                    <div className="mb-4">
+                        <h1 className="text-5xl font-black tracking-tight text-cyan-400">Equatino!</h1>
+                        <p className="text-gray-400 mt-1">Team: {card.teamName || 'N/A'}</p>
                     </div>
-                );
+                    <div className="fade-in grid grid-cols-5 gap-2 bg-gray-800 p-3 rounded-lg shadow-2xl w-full aspect-square">
+                        {Array.from({ length: 25 }).map((_, i) => renderCell(i))}
+                    </div>
+                </div>
+            );
+        };
+
+        // --- ADMIN VIEW ---
+        const AdminBingoCard = ({ numbers, markedIndices }) => {
+            const markedSet = new Set(markedIndices || [12]);
+            return (
+                <div className="admin-card grid grid-cols-5 gap-1 p-1 bg-gray-800 rounded-md mt-2">
+                    {Array.from({ length: 25 }).map((_, i) => {
+                        const isCenter = i === 12;
+                        const number = isCenter ? "★" : numbers[i > 12 ? i - 1 : i];
+                        const isMarked = markedSet.has(i);
+                        return <div key={i} className={`bingo-cell flex items-center justify-center rounded bg-gray-700 aspect-square ${isMarked ? 'marked' : ''}`}>{number}</div>;
+                    })}
+                </div>
+            );
+        };
+        
+        const GameControlPanel = ({ onResetGame, isResetting }) => {
+            const [selectedQuestion, setSelectedQuestion] = useState(1);
+            const [gameState, setGameState] = useState({});
+            const [timeLeft, setTimeLeft] = useState(0);
+
+            useEffect(() => {
+                const gameStateRef = window.firebase.doc(window.db, `/artifacts/${window.appId}/public/data/game-state/current`);
+                const unsubscribe = window.firebase.onSnapshot(gameStateRef, (doc) => {
+                    if(doc.exists()) setGameState(doc.data());
+                });
+                return () => unsubscribe();
+            }, []);
+
+             useEffect(() => {
+                if (gameState.endTime) {
+                    const updateTimer = () => {
+                        const now = Date.now();
+                        const end = gameState.endTime.toDate().getTime();
+                        const secondsLeft = Math.max(0, Math.floor((end - now) / 1000));
+                        setTimeLeft(secondsLeft);
+                        if (secondsLeft === 0) clearInterval(timerInterval);
+                    };
+                    updateTimer();
+                    const timerInterval = setInterval(updateTimer, 1000);
+                    return () => clearInterval(timerInterval);
+                } else {
+                    setTimeLeft(0);
+                }
+            }, [gameState.endTime]);
+            
+            const handleActivate = async () => {
+                const endTime = new Date(Date.now() + QUESTION_TIME_LIMIT * 1000);
+                const gameStateRef = window.firebase.doc(window.db, `/artifacts/${window.appId}/public/data/game-state/current`);
+                await window.firebase.setDoc(gameStateRef, {
+                    activeQuestionId: parseInt(selectedQuestion),
+                    endTime: endTime
+                }, { merge: true });
+            };
+
+            const handleDeactivate = async () => {
+                const gameStateRef = window.firebase.doc(window.db, `/artifacts/${window.appId}/public/data/game-state/current`);
+                await window.firebase.updateDoc(gameStateRef, { activeQuestionId: null, endTime: null });
             };
 
             return (
-                <div className="admin-card grid grid-cols-5 gap-1 p-1 bg-gray-800 rounded-md mt-2">
-                    {Array.from({ length: 25 }).map((_, i) => renderCell(i))}
+                <div className="bg-gray-900 p-4 rounded-lg mb-6 shadow-lg">
+                    <h2 className="text-2xl font-bold text-center mb-4">Game Controls</h2>
+                    <div className="flex flex-wrap items-center justify-center gap-4">
+                        <select
+                            value={selectedQuestion}
+                            onChange={(e) => setSelectedQuestion(e.target.value)}
+                            className="bg-gray-700 border border-gray-600 rounded-md p-2 text-white focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                        >
+                            {QUESTIONS_DATA.map(q => <option key={q.id} value={q.id}>Question #{q.id}</option>)}
+                        </select>
+                        <button onClick={handleActivate} className="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-lg">Activate</button>
+                        <button onClick={handleDeactivate} className="bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-2 px-4 rounded-lg">Deactivate</button>
+                        <button onClick={onResetGame} className={`font-bold py-2 px-4 rounded-lg ${isResetting ? 'bg-red-700 text-white' : 'bg-red-500 hover:bg-red-600 text-white'}`}>
+                            {isResetting ? 'Confirm Reset?' : 'Reset Game'}
+                        </button>
+                    </div>
+                    {gameState.activeQuestionId && (
+                        <div className="mt-4 text-center bg-gray-800 p-4 rounded-lg">
+                            <p className="font-bold text-cyan-400">Active Question: #{gameState.activeQuestionId} ({timeLeft}s left)</p>
+                            <p className="text-sm mt-1">Correct Answer: {QUESTIONS_DATA.find(q => q.id === gameState.activeQuestionId)?.correctKey}</p>
+                        </div>
+                    )}
                 </div>
             );
         };
@@ -234,6 +378,8 @@
         const AdminView = () => {
             const [cards, setCards] = useState([]);
             const [loading, setLoading] = useState(true);
+            const [confirmingDelete, setConfirmingDelete] = useState(null); // card.id to confirm delete
+            const [confirmingReset, setConfirmingReset] = useState(false);
 
             useEffect(() => {
                 const cardsCollectionRef = window.firebase.collection(window.db, `/artifacts/${window.appId}/public/data/equatino-cards`);
@@ -260,89 +406,145 @@
                 const cardDocPath = `/artifacts/${window.appId}/public/data/equatino-cards/${cardId}`;
                 window.firebase.updateDoc(window.firebase.doc(window.db, cardDocPath), { teamName: newName });
             };
-            
+
+            const handleDeleteTeam = async (cardId) => {
+                if (confirmingDelete !== cardId) {
+                    setConfirmingDelete(cardId);
+                    setTimeout(() => setConfirmingDelete(null), 3000); // Auto-cancel after 3s
+                    return;
+                }
+                const cardDocRef = window.firebase.doc(window.db, `/artifacts/${window.appId}/public/data/equatino-cards/${cardId}`);
+                await window.firebase.deleteDoc(cardDocRef);
+                setConfirmingDelete(null);
+            };
+
+            const handleResetGame = async () => {
+                if (!confirmingReset) {
+                    setConfirmingReset(true);
+                    setTimeout(() => setConfirmingReset(false), 3000);
+                    return;
+                }
+                
+                const cardsCollectionRef = window.firebase.collection(window.db, `/artifacts/${window.appId}/public/data/equatino-cards`);
+                const gameStateRef = window.firebase.doc(window.db, `/artifacts/${window.appId}/public/data/game-state/current`);
+                
+                const batch = window.firebase.writeBatch(window.db);
+                const snapshot = await window.firebase.getDocs(cardsCollectionRef);
+                snapshot.forEach(doc => batch.delete(doc.ref));
+                batch.delete(gameStateRef); // Also reset the game state
+                
+                await batch.commit();
+                setConfirmingReset(false);
+            };
+
+            // Leader Highlighting Logic
+            const scores = cards.map(card => card.markedIndices?.length || 0);
+            const maxScore = Math.max(...scores, 1); // Use 1 as minimum to avoid highlighting all on 0
+
             if (loading) return <div>Loading Admin Panel...</div>;
 
             return (
-                <div className="w-full max-w-6xl mx-auto text-center p-4">
+                <div className="w-full max-w-7xl mx-auto text-center p-4">
                     <h1 className="text-4xl font-bold text-cyan-400 mb-6">Admin Dashboard</h1>
+                    <GameControlPanel onResetGame={handleResetGame} isResetting={confirmingReset} />
                     {cards.length === 0 && <p className="text-gray-500 py-4 bg-gray-800 rounded-lg">No cards have been generated yet.</p>}
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                        {cards.map(card => (
-                            <div key={card.id} className="bg-gray-800 rounded-lg shadow-xl p-4">
-                                <input
-                                    type="text"
-                                    defaultValue={card.teamName || ''}
-                                    onBlur={(e) => handleTeamNameChange(card.id, e.target.value)}
-                                    placeholder="Enter team name..."
-                                    className="w-full bg-gray-700 border border-gray-600 rounded-md p-2 text-white focus:outline-none focus:ring-2 focus:ring-cyan-500"
-                                />
-                                <AdminBingoCard numbers={card.cardNumbers} markedIndices={card.markedIndices} />
-                                <p className="text-xs text-gray-500 mt-2 font-mono">{card.id}</p>
-                            </div>
-                        ))}
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                        {cards.map(card => {
+                            const isLeader = (card.markedIndices?.length || 0) === maxScore;
+                            const leaderClass = isLeader ? 'ring-2 ring-amber-400 shadow-lg' : '';
+                            const isConfirming = confirmingDelete === card.id;
+
+                            return (
+                                <div key={card.id} className={`bg-gray-800 rounded-lg shadow-xl p-4 transition-all ${leaderClass}`}>
+                                    <div className="flex justify-between items-center mb-2">
+                                        <input
+                                            type="text"
+                                            defaultValue={card.teamName || ''}
+                                            onBlur={(e) => handleTeamNameChange(card.id, e.target.value)}
+                                            placeholder="Enter team name..."
+                                            className="w-full bg-gray-700 border border-gray-600 rounded-md p-2 text-white focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                                        />
+                                        <button 
+                                            onClick={() => handleDeleteTeam(card.id)} 
+                                            className={`ml-2 px-3 py-1 text-sm font-bold text-white rounded ${isConfirming ? 'bg-red-700' : 'bg-red-500 hover:bg-red-600'}`}
+                                        >
+                                            {isConfirming ? 'Confirm?' : 'Del'}
+                                        </button>
+                                    </div>
+                                    <AdminBingoCard numbers={card.cardNumbers} markedIndices={card.markedIndices} />
+                                    <p className="text-xs text-gray-500 mt-2 font-mono">{card.id}</p>
+                                </div>
+                            );
+                        })}
                     </div>
                 </div>
             );
         };
 
         const OrganizerView = () => {
-            const [generatedUrl, setGeneratedUrl] = useState('');
-            const [showQr, setShowQr] = useState(false);
+             const [generatedUrl, setGeneratedUrl] = useState('');
+             const [showQr, setShowQr] = useState(false);
 
-            useEffect(() => {
-                if (generatedUrl) {
-                    const qrcodeDiv = document.getElementById('qrcode');
-                    if (qrcodeDiv) {
-                        qrcodeDiv.innerHTML = ''; 
-                        new QRCode(qrcodeDiv, { text: generatedUrl, width: 256, height: 256 });
-                    }
-                }
-            }, [generatedUrl]);
+             useEffect(() => {
+                 if (generatedUrl) {
+                     const qrcodeDiv = document.getElementById('qrcode');
+                     if (qrcodeDiv) {
+                         qrcodeDiv.innerHTML = ''; 
+                         new QRCode(qrcodeDiv, { text: generatedUrl, width: 256, height: 256 });
+                     }
+                 }
+             }, [generatedUrl]);
 
-            const handleGenerateLink = () => {
-                const newSeed = Math.random().toString(36).substring(2, 10);
-                const baseUrl = window.location.href.split('?')[0];
-                const newUrl = `${baseUrl}?seed=${newSeed}`;
+             const handleGenerateLink = () => {
+                 const newSeed = Math.random().toString(36).substring(2, 10);
+                 const baseUrl = window.location.href.split('?')[0];
+                 const newUrl = `${baseUrl}?seed=${newSeed}`;
 
-                setGeneratedUrl(newUrl);
-                setShowQr(true);
+                 setGeneratedUrl(newUrl);
+                 setShowQr(true);
 
-                const randomFunc = createSeededRandom(newSeed);
-                const cardNumbers = getShuffledNumbers(randomFunc, BINGO_MIN_NUMBER, BINGO_MAX_NUMBER).slice(0, 24);
-                const cardDocPath = `/artifacts/${window.appId}/public/data/equatino-cards/${newSeed}`;
-                
-                window.firebase.setDoc(window.firebase.doc(window.db, cardDocPath), {
-                    seed: newSeed,
-                    teamName: "",
-                    cardNumbers: cardNumbers,
-                    markedIndices: [12], // Start with center marked
-                    createdAt: window.firebase.serverTimestamp()
-                }).catch(error => {
-                    console.error("Error saving card to Firestore:", error);
-                });
-            };
+                 const randomFunc = createSeededRandom(newSeed);
+                 const allQuestionNumbers = Array.from({ length: BINGO_MAX_NUMBER }, (_, i) => i + 1);
+                 for (let i = allQuestionNumbers.length - 1; i > 0; i--) { // Shuffle all 30
+                    const j = randomFunc() % (i + 1);
+                    [allQuestionNumbers[i], allQuestionNumbers[j]] = [allQuestionNumbers[j], allQuestionNumbers[i]];
+                 }
+                 const cardNumbers = allQuestionNumbers.slice(0, 24); // Take first 24 for the card
 
-            return (
-                <div className="w-full max-w-md text-center">
-                    <h1 className="text-3xl font-bold text-cyan-400">Organizer Panel</h1>
-                    <p className="text-gray-400 mb-6">Generate a unique QR code for participants</p>
-                    <button onClick={handleGenerateLink} className="bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-3 px-8 rounded-lg shadow-lg">
-                        Generate New QR Code
-                    </button>
-                    
-                    {showQr && (
-                        <div id="qr-code-container" className="mt-6 p-4 border-2 border-dashed border-gray-700 rounded-lg fade-in">
-                            <p className="text-gray-400 mb-2 text-sm">Project this QR code</p>
-                            <div id="qrcode" className="flex justify-center bg-white p-4 rounded-md mx-auto w-fit"></div>
-                            <div className="mt-4">
-                                <p className="text-gray-400 text-sm">Or share this link:</p>
-                                <input type="text" className="w-full bg-gray-700 rounded p-2 mt-1 text-center" value={generatedUrl} readOnly />
-                            </div>
-                        </div>
-                    )}
-                </div>
-            );
+                 const cardDocPath = `/artifacts/${window.appId}/public/data/equatino-cards/${newSeed}`;
+                 
+                 window.firebase.setDoc(window.firebase.doc(window.db, cardDocPath), {
+                     seed: newSeed,
+                     teamName: "",
+                     cardNumbers: cardNumbers,
+                     markedIndices: [12], // Start with center marked
+                     attempts: {}, // To track one-shot rule
+                     createdAt: window.firebase.serverTimestamp()
+                 }).catch(error => {
+                     console.error("Error saving card to Firestore:", error);
+                 });
+             };
+
+             return (
+                 <div className="w-full max-w-md mx-auto text-center mt-10">
+                     <h1 className="text-3xl font-bold text-cyan-400">Organizer Panel</h1>
+                     <p className="text-gray-400 mb-6">Generate a unique QR code for participants</p>
+                     <button onClick={handleGenerateLink} className="bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-3 px-8 rounded-lg shadow-lg">
+                         Generate New QR Code
+                     </button>
+                     
+                     {showQr && (
+                         <div id="qr-code-container" className="mt-6 p-4 border-2 border-dashed border-gray-700 rounded-lg fade-in">
+                             <p className="text-gray-400 mb-2 text-sm">Project this QR code</p>
+                             <div id="qrcode" className="flex justify-center bg-white p-4 rounded-md mx-auto w-fit"></div>
+                             <div className="mt-4">
+                                 <p className="text-gray-400 text-sm">Or share this link:</p>
+                                 <input type="text" className="w-full bg-gray-700 rounded p-2 mt-1 text-center" value={generatedUrl} readOnly />
+                             </div>
+                         </div>
+                     )}
+                 </div>
+             );
         };
 
         const App = () => {
@@ -365,7 +567,7 @@
                 case 'participant': return <ParticipantView seed={seed} />;
                 case 'admin': return <AdminView />;
                 case 'organizer': return <OrganizerView />;
-                default: return <div>Loading...</div>;
+                default: return <div className="text-center mt-10">Loading...</div>;
             }
         };
 
@@ -375,7 +577,8 @@
             } catch (error) {
                 console.error("Authentication failed:", error);
             }
-            ReactDOM.render(<StrictMode><App /></StrictMode>, document.getElementById('root'));
+            const root = ReactDOM.createRoot(document.getElementById('root'));
+            root.render(<StrictMode><App /></StrictMode>);
         };
         
         if (window.db) {
