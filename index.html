@@ -235,7 +235,8 @@
             const renderCell = (cellIndex) => {
                 const number = card.cardNumbers[cellIndex];
                 const isMarked = card.markedIndices?.includes(cellIndex);
-                const isActive = gameState.activeQuestionId === number && timeLeft > 0;
+                // BUG FIX: Explicitly convert gameState.activeQuestionId to a number for robust comparison
+                const isActive = Number(gameState.activeQuestionId) === number && timeLeft > 0;
                 const wasAttempted = card.attempts?.[number];
 
                 if (isMarked) {
@@ -265,7 +266,7 @@
             return (
                 <div className="w-full max-w-md mx-auto text-center">
                     {isBingo && <BingoAnimation />}
-                    <QuestionModal question={QUESTIONS_DATA.find(q => q.id === gameState.activeQuestionId)} timeLeft={timeLeft} activeQuestionId={gameState.activeQuestionId} />
+                    <QuestionModal question={QUESTIONS_DATA.find(q => q.id === Number(gameState.activeQuestionId))} timeLeft={timeLeft} activeQuestionId={gameState.activeQuestionId} />
                     <div className="mb-4">
                         <h1 className="text-5xl font-black tracking-tight text-cyan-400">Equatino!</h1>
                         <p className="text-gray-400 mt-1">Team: {card.teamName || 'N/A'}</p>
@@ -354,7 +355,7 @@
                     {gameState.activeQuestionId && (
                         <div className="mt-4 text-center bg-gray-800 p-4 rounded-lg">
                             <p className="font-bold text-cyan-400">Active Question: #{gameState.activeQuestionId} ({timeLeft}s left)</p>
-                            <p className="text-sm mt-1">Correct Answer: {QUESTIONS_DATA.find(q => q.id === gameState.activeQuestionId)?.correctKey}</p>
+                            <p className="text-sm mt-1">Correct Answer: {QUESTIONS_DATA.find(q => q.id === Number(gameState.activeQuestionId))?.correctKey}</p>
                         </div>
                     )}
                 </div>
@@ -565,7 +566,6 @@
             } catch (error) {
                 console.error("Authentication failed:", error);
             }
-            // BUG FIX: Use the correct React 18 createRoot API
             const root = ReactDOM.createRoot(document.getElementById('root'));
             root.render(<StrictMode><App /></StrictMode>);
         };
