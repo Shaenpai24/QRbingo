@@ -89,13 +89,14 @@
         import { getFirestore, doc, setDoc, onSnapshot, collection, updateDoc, serverTimestamp, query, writeBatch, deleteDoc, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         
+        // BUG FIX: Corrected the typo in the appId
         const firebaseConfig = {
           apiKey: "AIzaSyBP2pYBRM4Eri0AJr4iZ2P7b08Cs6pTrtg",
           authDomain: "qr-gen-637fb.firebaseapp.com",
           projectId: "qr-gen-637fb",
           storageBucket: "qr-gen-637fb.appspot.com",
           messagingSenderId: "146967798778",
-          appId: "1:1469677a8778:web:55f179f4ae3f3916f6ba43",
+          appId: "1:146967798778:web:55f179f4ae3f3916f6ba43",
           measurementId: "G-1F0XF63NJP"
         };
 
