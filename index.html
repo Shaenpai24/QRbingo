@@ -65,6 +65,14 @@
             z-index: 1000;
             animation: fadeIn 0.3s ease-out;
         }
+        .confirmation-modal {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-color: rgba(0, 0, 0, 0.7);
+            display: flex; align-items: center; justify-content: center;
+            z-index: 10000;
+            animation: fadeIn 0.2s ease-out;
+        }
     </style>
 </head>
 <body>
@@ -108,7 +116,6 @@
         const BINGO_MAX_NUMBER = 30;
         const QUESTION_TIME_LIMIT = 120;
 
-        // --- Central Question Bank with Direct Answers ---
         const QUESTIONS_DATA = [
             { id: 1, text: "In a room of 10 people, if everyone shakes hands with everyone else exactly once, how many handshakes occur in total?", correctAnswer: "45" },
             { id: 2, text: "What is the next number in the sequence: 1, 4, 9, 16, 25, ...?", correctAnswer: "36" },
@@ -148,7 +155,6 @@
             [0,6,12,18,24], [4,8,12,16,20]
         ];
 
-        // --- HELPER FUNCTIONS ---
         function createSeededRandom(seed) {
             let h = 1779033703 ^ seed.length;
             for (let i = 0; i < seed.length; i++) {
@@ -162,48 +168,20 @@
             }
         }
 
-        /**
-         * Compares a submitted answer with the correct answer, normalizing for common formatting issues.
-         * @param {string} submitted - The user's submitted answer.
-         * @param {string} correct - The correct answer from the database.
-         * @returns {boolean} - True if the answers are considered equivalent.
-         */
         function isAnswerCorrect(submitted, correct) {
-            if (typeof submitted !== 'string' || typeof correct !== 'string') {
-                return false;
-            }
-
-            // Step 1: Normalize both strings (trim whitespace, convert to lowercase)
+            if (typeof submitted !== 'string' || typeof correct !== 'string') return false;
             const normalizedSubmitted = submitted.trim().toLowerCase();
             const normalizedCorrect = correct.trim().toLowerCase();
-
-            // Step 2: Direct comparison for simple cases
-            if (normalizedSubmitted === normalizedCorrect) {
-                return true;
-            }
-
-            // Step 3: Attempt numerical comparison
+            if (normalizedSubmitted === normalizedCorrect) return true;
             const submittedNum = parseFloat(normalizedSubmitted);
             const correctNum = parseFloat(normalizedCorrect);
-
-            // If both are valid numbers, compare them
-            if (!isNaN(submittedNum) && !isNaN(correctNum) && submittedNum === correctNum) {
-                return true;
-            }
-            
-            // Handle special string cases like "25pi" vs "25 pi"
-            if (normalizedSubmitted.replace(/\s/g, '') === normalizedCorrect.replace(/\s/g, '')) {
-                return true;
-            }
-
+            if (!isNaN(submittedNum) && !isNaN(correctNum) && submittedNum === correctNum) return true;
+            if (normalizedSubmitted.replace(/\s/g, '') === normalizedCorrect.replace(/\s/g, '')) return true;
             return false;
         }
 
-
-        // --- SHARED COMPONENTS ---
         const BingoAnimation = () => ( <div className="bingo-overlay fade-in"><div className="bingo-text">BINGO!</div></div> );
 
-        // --- PARTICIPANT VIEW ---
         const QuestionModal = ({ question, timeLeft, activeQuestionId }) => {
             if (!question) return null;
             const progress = (timeLeft / QUESTION_TIME_LIMIT) * 100;
@@ -218,28 +196,42 @@
                 </div>
             );
         };
+
+        const ConfirmationModal = ({ submission, onConfirm, onCancel }) => {
+            if (!submission) return null;
+            return (
+                <div className="confirmation-modal">
+                    <div className="bg-gray-800 p-8 rounded-lg shadow-2xl text-center">
+                        <h3 className="text-2xl font-bold mb-4">Confirm Submission</h3>
+                        <p className="text-lg mb-2">Your answer for Question #{submission.questionId}:</p>
+                        <p className="text-3xl font-mono bg-gray-900 text-cyan-400 py-2 px-4 rounded-md mb-6">{submission.answer}</p>
+                        <p className="text-yellow-400 mb-6">This is your only attempt. Are you sure?</p>
+                        <div className="flex justify-center gap-4">
+                            <button onClick={onConfirm} className="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-6 rounded-lg">Confirm</button>
+                            <button onClick={onCancel} className="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-6 rounded-lg">Cancel</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
         
         const ParticipantView = ({ seed }) => {
             const [card, setCard] = useState(null);
             const [gameState, setGameState] = useState({});
             const [isBingo, setIsBingo] = useState(false);
             const [timeLeft, setTimeLeft] = useState(0);
+            const [confirmingSubmission, setConfirmingSubmission] = useState(null);
 
             useEffect(() => {
                 const cardDocRef = window.firebase.doc(window.db, `/artifacts/${window.appId}/public/data/equatino-cards/${seed}`);
                 const unsubscribeCard = window.firebase.onSnapshot(cardDocRef, (doc) => {
                     if (doc.exists()) setCard(doc.data());
                 });
-
                 const gameStateRef = window.firebase.doc(window.db, `/artifacts/${window.appId}/public/data/game-state/current`);
                 const unsubscribeGameState = window.firebase.onSnapshot(gameStateRef, (doc) => {
                     if (doc.exists()) setGameState(doc.data());
                 });
-
-                return () => {
-                    unsubscribeCard();
-                    unsubscribeGameState();
-                };
+                return () => { unsubscribeCard(); unsubscribeGameState(); };
             }, [seed]);
 
             useEffect(() => {
@@ -268,25 +260,30 @@
                 }
             }, [card?.markedIndices]);
 
-            const handleSubmitAnswer = async (questionId, submittedAnswer) => {
+            const handleAttemptSubmit = (questionId, submittedAnswer) => {
                 if (!submittedAnswer || card.attempts?.[questionId]) return;
+                setConfirmingSubmission({ questionId, answer: submittedAnswer });
+            };
 
+            const handleConfirmSubmit = async () => {
+                if (!confirmingSubmission) return;
+                const { questionId, answer } = confirmingSubmission;
+                
                 const question = QUESTIONS_DATA.find(q => q.id === questionId);
-                const correct = isAnswerCorrect(submittedAnswer, question.correctAnswer);
+                const correct = isAnswerCorrect(answer, question.correctAnswer);
                 
                 const cardDocRef = window.firebase.doc(window.db, `/artifacts/${window.appId}/public/data/equatino-cards/${seed}`);
                 const newMarks = new Set(card.markedIndices);
                 if (correct) {
                     const cellIndex = card.cardNumbers.findIndex(n => n === questionId);
-                    if (cellIndex !== -1) {
-                        newMarks.add(cellIndex);
-                    }
+                    if (cellIndex !== -1) newMarks.add(cellIndex);
                 }
 
                 await window.firebase.updateDoc(cardDocRef, {
-                    [`attempts.${questionId}`]: submittedAnswer,
+                    [`attempts.${questionId}`]: answer,
                     markedIndices: Array.from(newMarks)
                 });
+                setConfirmingSubmission(null);
             };
 
             const renderCell = (cellIndex) => {
@@ -301,7 +298,7 @@
                 
                 if (isActive && !wasAttempted) {
                     return (
-                        <form key={cellIndex} onSubmit={(e) => { e.preventDefault(); handleSubmitAnswer(number, e.target.answer.value); }}>
+                        <form key={cellIndex} onSubmit={(e) => { e.preventDefault(); handleAttemptSubmit(number, e.target.answer.value); }}>
                             <input
                                 name="answer"
                                 type="text"
@@ -321,6 +318,7 @@
             return (
                 <div className="w-full max-w-md mx-auto text-center">
                     {isBingo && <BingoAnimation />}
+                    <ConfirmationModal submission={confirmingSubmission} onConfirm={handleConfirmSubmit} onCancel={() => setConfirmingSubmission(null)} />
                     <QuestionModal question={QUESTIONS_DATA.find(q => q.id === Number(gameState.activeQuestionId))} timeLeft={timeLeft} activeQuestionId={gameState.activeQuestionId} />
                     <div className="mb-4">
                         <h1 className="text-5xl font-black tracking-tight text-cyan-400">Equatino!</h1>
