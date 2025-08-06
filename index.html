@@ -177,17 +177,185 @@
             [0,6,12,18,24], [4,8,12,16,20]
         ];
 
-        function createSeededRandom(seed) { /* ... same as before ... */ }
+        function createSeededRandom(seed) {
+            let h = 1779033703 ^ seed.length;
+            for (let i = 0; i < seed.length; i++) {
+                h = Math.imul(h ^ seed.charCodeAt(i), 3432918353);
+                h = h << 13 | h >>> 19;
+            }
+            return function() {
+                h = Math.imul(h ^ h >>> 16, 2246822507);
+                h = Math.imul(h ^ h >>> 13, 3266489909);
+                return (h ^= h >>> 16) >>> 0;
+            }
+        }
 
         const BingoAnimation = () => ( <div className="bingo-overlay fade-in"><div className="bingo-text">BINGO!</div></div> );
 
-        const QuestionModal = ({ question, timeLeft, activeQuestionId }) => { /* ... same as before ... */ };
+        const QuestionModal = ({ question, timeLeft, activeQuestionId }) => {
+            if (!question) return null;
+            const progress = (timeLeft / QUESTION_TIME_LIMIT) * 100;
+            return (
+                <div className="question-modal w-11/12 max-w-2xl bg-gray-900 border-2 border-cyan-500 rounded-lg p-6 shadow-2xl">
+                    <h2 className="text-xl font-bold text-cyan-400 mb-2">Question #{activeQuestionId} is Active!</h2>
+                    <p className="text-lg mb-4">{question.text}</p>
+                    <div className="w-full bg-gray-700 rounded-full h-2.5">
+                       <div className="bg-cyan-500 h-2.5 rounded-full" style={{ width: `${progress}%`, transition: 'width 0.5s linear' }}></div>
+                    </div>
+                    <p className="text-center text-sm font-bold mt-2">{timeLeft}s remaining</p>
+                </div>
+            );
+        };
 
-        const ConfirmationModal = ({ submission, onConfirm, onCancel }) => { /* ... same as before ... */ };
+        const ConfirmationModal = ({ submission, onConfirm, onCancel }) => {
+            if (!submission) return null;
+            return (
+                <div className="confirmation-modal">
+                    <div className="bg-gray-800 p-8 rounded-lg shadow-2xl text-center">
+                        <h3 className="text-2xl font-bold mb-4">Confirm Submission</h3>
+                        <p className="text-lg mb-2">Your answer for the current question is:</p>
+                        <p className="text-3xl font-mono bg-gray-900 text-cyan-400 py-2 px-4 rounded-md mb-6">Box #{submission.boxNumber}</p>
+                        <p className="text-yellow-400 mb-6">This is your only attempt. Are you sure?</p>
+                        <div className="flex justify-center gap-4">
+                            <button onClick={onConfirm} className="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-6 rounded-lg">Confirm</button>
+                            <button onClick={onCancel} className="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-6 rounded-lg">Cancel</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
         
-        const ParticipantView = ({ seed }) => { /* ... same as before ... */ };
+        const ParticipantView = ({ seed }) => {
+            const [card, setCard] = useState(null);
+            const [gameState, setGameState] = useState({});
+            const [isBingo, setIsBingo] = useState(false);
+            const [timeLeft, setTimeLeft] = useState(0);
+            const [confirmingSubmission, setConfirmingSubmission] = useState(null);
 
-        const AdminBingoCard = ({ numbers, markedIndices }) => { /* ... same as before ... */ };
+            useEffect(() => {
+                const cardDocRef = window.firebase.doc(window.db, `/artifacts/${window.appId}/public/data/equatino-cards/${seed}`);
+                const unsubscribeCard = window.firebase.onSnapshot(cardDocRef, (doc) => {
+                    if (doc.exists()) setCard(doc.data());
+                });
+                const gameStateRef = window.firebase.doc(window.db, `/artifacts/${window.appId}/public/data/game-state/current`);
+                const unsubscribeGameState = window.firebase.onSnapshot(gameStateRef, (doc) => {
+                    if (doc.exists()) setGameState(doc.data());
+                });
+                return () => { unsubscribeCard(); unsubscribeGameState(); };
+            }, [seed]);
+
+            useEffect(() => {
+                if (gameState.endTime) {
+                    const updateTimer = () => {
+                        const now = Date.now();
+                        const end = gameState.endTime.toDate().getTime();
+                        const secondsLeft = Math.max(0, Math.floor((end - now) / 1000));
+                        setTimeLeft(secondsLeft);
+                        if (secondsLeft === 0) clearInterval(timerInterval);
+                    };
+                    updateTimer();
+                    const timerInterval = setInterval(updateTimer, 1000);
+                    return () => clearInterval(timerInterval);
+                }
+            }, [gameState.endTime]);
+
+            useEffect(() => {
+                if (card?.markedIndices) {
+                    const markedSet = new Set(card.markedIndices);
+                    let lines = 0;
+                    for (const combo of winningCombos) {
+                        if (combo.every(index => markedSet.has(index))) {
+                            lines++;
+                        }
+                    }
+                    if (lines >= LINES_TO_WIN) {
+                        setIsBingo(true);
+                    } else {
+                        setIsBingo(false);
+                    }
+                }
+            }, [card?.markedIndices]);
+
+            const handleAttemptClick = (boxNumber) => {
+                if (card.attempts?.[gameState.activeQuestionId]) return;
+                setConfirmingSubmission({ boxNumber });
+            };
+
+            const handleConfirmSubmit = async () => {
+                if (!confirmingSubmission) return;
+                const { boxNumber } = confirmingSubmission;
+                const activeQuestionId = gameState.activeQuestionId;
+                
+                const question = QUESTIONS_DATA.find(q => q.id === activeQuestionId);
+                const isCorrect = String(boxNumber) === question.correctAnswer;
+                
+                const cardDocRef = window.firebase.doc(window.db, `/artifacts/${window.appId}/public/data/equatino-cards/${seed}`);
+                const newMarks = new Set(card.markedIndices);
+                if (isCorrect) {
+                    const cellIndex = card.cardNumbers.findIndex(n => n === boxNumber);
+                    if (cellIndex !== -1) newMarks.add(cellIndex);
+                }
+
+                await window.firebase.updateDoc(cardDocRef, {
+                    [`attempts.${activeQuestionId}`]: boxNumber,
+                    markedIndices: Array.from(newMarks)
+                });
+                setConfirmingSubmission(null);
+            };
+
+            const renderCell = (cellIndex) => {
+                const number = card.cardNumbers[cellIndex];
+                const isMarked = card.markedIndices?.includes(cellIndex);
+                const isQuestionActive = timeLeft > 0 && gameState.activeQuestionId && !card.attempts?.[gameState.activeQuestionId];
+                
+                if (isMarked) {
+                    return <div key={cellIndex} className="bingo-cell marked flex items-center justify-center text-xl md:text-2xl font-bold rounded-md">{number}</div>;
+                }
+                
+                if (isQuestionActive) {
+                    return (
+                        <div 
+                            key={cellIndex} 
+                            className="bingo-cell clickable flex items-center justify-center text-xl md:text-2xl font-bold rounded-md bg-gray-900"
+                            onClick={() => handleAttemptClick(number)}
+                        >
+                            {number}
+                        </div>
+                    );
+                }
+
+                return <div key={cellIndex} className={`bingo-cell flex items-center justify-center text-xl md:text-2xl font-bold rounded-md bg-gray-900`}>{number}</div>;
+            };
+            
+            if (!card?.cardNumbers) return <div>Loading Card...</div>;
+
+            return (
+                <div className="w-full max-w-md mx-auto text-center">
+                    {isBingo && <BingoAnimation />}
+                    <ConfirmationModal submission={confirmingSubmission} onConfirm={handleConfirmSubmit} onCancel={() => setConfirmingSubmission(null)} />
+                    <QuestionModal question={QUESTIONS_DATA.find(q => q.id === Number(gameState.activeQuestionId))} timeLeft={timeLeft} activeQuestionId={gameState.activeQuestionId} />
+                    <div className="mb-4">
+                        <h1 className="text-5xl font-black tracking-tight text-cyan-400">Equatino!</h1>
+                        <p className="text-gray-400 mt-1">Team: {card.teamName || 'N/A'}</p>
+                    </div>
+                    <div className="fade-in grid grid-cols-5 gap-2 bg-gray-800 p-3 rounded-lg shadow-2xl w-full aspect-square">
+                        {Array.from({ length: 25 }).map((_, i) => renderCell(i))}
+                    </div>
+                </div>
+            );
+        };
+
+        const AdminBingoCard = ({ numbers, markedIndices }) => {
+            const markedSet = new Set(markedIndices || []);
+            return (
+                <div className="admin-card grid grid-cols-5 gap-1 p-1 bg-gray-800 rounded-md mt-2">
+                    {numbers.map((number, i) => {
+                        const isMarked = markedSet.has(i);
+                        return <div key={i} className={`bingo-cell flex items-center justify-center rounded bg-gray-700 aspect-square ${isMarked ? 'marked' : ''}`}>{number}</div>;
+                    })}
+                </div>
+            );
+        };
         
         const GameControlPanel = ({ onResetGame, isResetting }) => {
             const [gameState, setGameState] = useState({ questionIndex: -1 });
@@ -316,15 +484,255 @@
             );
         };
 
-        const AdminView = () => { /* ... same as before ... */ };
+        const AdminView = () => {
+            const [cards, setCards] = useState([]);
+            const [loading, setLoading] = useState(true);
+            const [confirmingDelete, setConfirmingDelete] = useState(null);
+            const [confirmingReset, setConfirmingReset] = useState(false);
 
-        const OrganizerView = () => { /* ... same as before ... */ };
+            useEffect(() => {
+                const cardsCollectionRef = window.firebase.collection(window.db, `/artifacts/${window.appId}/public/data/equatino-cards`);
+                const q = window.firebase.query(cardsCollectionRef);
 
-        const PasswordScreen = ({ onLogin }) => { /* ... same as before ... */ };
+                const unsubscribe = window.firebase.onSnapshot(q, (querySnapshot) => {
+                    const cardsData = [];
+                    querySnapshot.forEach((doc) => {
+                        cardsData.push({ id: doc.id, ...doc.data() });
+                    });
+                    
+                    cardsData.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+                    setCards(cardsData);
+                    setLoading(false);
+                }, (error) => {
+                    console.error("Firestore snapshot error:", error);
+                    setLoading(false);
+                });
 
-        const App = () => { /* ... same as before ... */ };
+                return () => unsubscribe();
+            }, []);
 
-        const renderApp = async () => { /* ... same as before ... */ };
+            const handleTeamNameChange = (cardId, newName) => {
+                const cardDocPath = `/artifacts/${window.appId}/public/data/equatino-cards/${cardId}`;
+                window.firebase.updateDoc(window.firebase.doc(window.db, cardDocPath), { teamName: newName });
+            };
+
+            const handleDeleteTeam = async (cardId) => {
+                if (confirmingDelete !== cardId) {
+                    setConfirmingDelete(cardId);
+                    setTimeout(() => setConfirmingDelete(null), 3000);
+                    return;
+                }
+                const cardDocRef = window.firebase.doc(window.db, `/artifacts/${window.appId}/public/data/equatino-cards/${cardId}`);
+                await window.firebase.deleteDoc(cardDocRef);
+                setConfirmingDelete(null);
+            };
+
+            const handleResetGame = async () => {
+                if (!confirmingReset) {
+                    setConfirmingReset(true);
+                    setTimeout(() => setConfirmingReset(false), 3000);
+                    return;
+                }
+                
+                const cardsCollectionRef = window.firebase.collection(window.db, `/artifacts/${window.appId}/public/data/equatino-cards`);
+                const gameStateRef = window.firebase.doc(window.db, `/artifacts/${window.appId}/public/data/game-state/current`);
+                
+                const batch = window.firebase.writeBatch(window.db);
+                const snapshot = await window.firebase.getDocs(cardsCollectionRef);
+                snapshot.forEach(doc => batch.delete(doc.ref));
+                batch.delete(gameStateRef);
+                
+                await batch.commit();
+                setConfirmingReset(false);
+            };
+
+            const scores = cards.map(card => card.markedIndices?.length || 0);
+            const maxScore = scores.length > 0 ? Math.max(...scores) : 0;
+
+            if (loading) return <div>Loading Admin Panel...</div>;
+
+            return (
+                <div className="w-full max-w-7xl mx-auto text-center p-4">
+                    <h1 className="text-4xl font-bold text-cyan-400 mb-6">Admin Dashboard</h1>
+                    <GameControlPanel onResetGame={handleResetGame} isResetting={confirmingReset} />
+                    {cards.length === 0 && <p className="text-gray-500 py-4 bg-gray-800 rounded-lg">No cards have been generated yet.</p>}
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                        {cards.map(card => {
+                            const isLeader = (card.markedIndices?.length || 0) === maxScore && maxScore > 0;
+                            const leaderClass = isLeader ? 'ring-2 ring-amber-400 shadow-lg' : '';
+                            const isConfirming = confirmingDelete === card.id;
+
+                            return (
+                                <div key={card.id} className={`bg-gray-800 rounded-lg shadow-xl p-4 transition-all ${leaderClass}`}>
+                                    <div className="flex justify-between items-center mb-2">
+                                        <input
+                                            type="text"
+                                            defaultValue={card.teamName || ''}
+                                            onBlur={(e) => handleTeamNameChange(card.id, e.target.value)}
+                                            placeholder="Enter team name..."
+                                            className="w-full bg-gray-700 border border-gray-600 rounded-md p-2 text-white focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                                        />
+                                        <button 
+                                            onClick={() => handleDeleteTeam(card.id)} 
+                                            className={`ml-2 px-3 py-1 text-sm font-bold text-white rounded ${isConfirming ? 'bg-red-700' : 'bg-red-500 hover:bg-red-600'}`}
+                                        >
+                                            {isConfirming ? 'Confirm?' : 'Del'}
+                                        </button>
+                                    </div>
+                                    {card.cardNumbers && <AdminBingoCard numbers={card.cardNumbers} markedIndices={card.markedIndices} />}
+                                    <p className="text-xs text-gray-500 mt-2 font-mono">{card.id}</p>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            );
+        };
+
+        const OrganizerView = () => {
+             const [generatedUrl, setGeneratedUrl] = useState('');
+             const [showQr, setShowQr] = useState(false);
+
+             useEffect(() => {
+                 if (generatedUrl) {
+                     const qrcodeDiv = document.getElementById('qrcode');
+                     if (qrcodeDiv) {
+                         qrcodeDiv.innerHTML = ''; 
+                         new QRCode(qrcodeDiv, { text: generatedUrl, width: 256, height: 256 });
+                     }
+                 }
+             }, [generatedUrl]);
+
+             const handleGenerateLink = () => {
+                 const newSeed = Math.random().toString(36).substring(2, 10);
+                 const baseUrl = window.location.href.split('?')[0];
+                 const newUrl = `${baseUrl}?seed=${newSeed}`;
+
+                 setGeneratedUrl(newUrl);
+                 setShowQr(true);
+
+                 const randomFunc = createSeededRandom(newSeed);
+                 const allQuestionNumbers = QUESTIONS_DATA.map(q => q.id);
+                 
+                 for (let i = allQuestionNumbers.length - 1; i > 0; i--) {
+                    const j = randomFunc() % (i + 1);
+                    [allQuestionNumbers[i], allQuestionNumbers[j]] = [allQuestionNumbers[j], allQuestionNumbers[i]];
+                 }
+                 const cardNumbers = allQuestionNumbers.slice(0, 25);
+
+                 const cardDocPath = `/artifacts/${window.appId}/public/data/equatino-cards/${newSeed}`;
+                 
+                 window.firebase.setDoc(window.firebase.doc(window.db, cardDocPath), {
+                     seed: newSeed,
+                     teamName: "",
+                     cardNumbers: cardNumbers,
+                     markedIndices: [],
+                     attempts: {},
+                     createdAt: window.firebase.serverTimestamp()
+                 }).catch(error => {
+                     console.error("Error saving card to Firestore:", error);
+                 });
+             };
+
+             return (
+                 <div className="w-full max-w-md mx-auto text-center mt-10">
+                     <h1 className="text-3xl font-bold text-cyan-400">Organizer Panel</h1>
+                     <p className="text-gray-400 mb-6">Generate a unique QR code for participants</p>
+                     <button onClick={handleGenerateLink} className="bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-3 px-8 rounded-lg shadow-lg">
+                         Generate New QR Code
+                     </button>
+                     
+                     {showQr && (
+                         <div id="qr-code-container" className="mt-6 p-4 border-2 border-dashed border-gray-700 rounded-lg fade-in">
+                             <p className="text-gray-400 mb-2 text-sm">Project this QR code</p>
+                             <div id="qrcode" className="flex justify-center bg-white p-4 rounded-md mx-auto w-fit"></div>
+                             <div className="mt-4">
+                                 <p className="text-gray-400 text-sm">Or share this link:</p>
+                                 <input type="text" className="w-full bg-gray-700 rounded p-2 mt-1 text-center" value={generatedUrl} readOnly />
+                             </div>
+                         </div>
+                     )}
+                 </div>
+             );
+        };
+
+        const PasswordScreen = ({ onLogin }) => {
+            const [password, setPassword] = useState('');
+            const [error, setError] = useState('');
+
+            const handleSubmit = (e) => {
+                e.preventDefault();
+                if (password === ADMIN_PASSWORD) {
+                    onLogin();
+                } else {
+                    setError('Incorrect password');
+                    setPassword('');
+                }
+            };
+
+            return (
+                <div className="flex items-center justify-center h-screen">
+                    <form onSubmit={handleSubmit} className="bg-gray-800 p-8 rounded-lg shadow-lg text-center">
+                        <h2 className="text-2xl font-bold text-cyan-400 mb-4">Admin Access</h2>
+                        <input
+                            type="password"
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                            placeholder="Enter password..."
+                            className="w-full bg-gray-700 border border-gray-600 rounded-md p-2 text-white focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                        />
+                        {error && <p className="text-red-500 mt-2">{error}</p>}
+                        <button type="submit" className="mt-4 bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 px-6 rounded-lg">
+                            Login
+                        </button>
+                    </form>
+                </div>
+            );
+        };
+
+        const App = () => {
+            const [view, setView] = useState('loading');
+            const [seed, setSeed] = useState(null);
+            const [isAuthenticated, setIsAuthenticated] = useState(false);
+
+            useEffect(() => {
+                const urlParams = new URLSearchParams(window.location.search);
+                if (urlParams.has('seed')) {
+                    setSeed(urlParams.get('seed'));
+                    setView('participant');
+                } else if (urlParams.has('admin')) {
+                    setView('admin');
+                } else {
+                    setView('organizer');
+                }
+            }, []);
+
+            if (view === 'participant') {
+                return <ParticipantView seed={seed} />;
+            }
+
+            if (view === 'organizer' || view === 'admin') {
+                if (!isAuthenticated) {
+                    return <PasswordScreen onLogin={() => setIsAuthenticated(true)} />;
+                }
+                switch (view) {
+                    case 'admin': return <AdminView />;
+                    case 'organizer': return <OrganizerView />;
+                }
+            }
+            
+            return <div className="text-center mt-10">Loading...</div>;
+        };
+
+        const renderApp = async () => {
+            try {
+                await window.firebase.signInAnonymously(window.auth);
+            } catch (error) {
+                console.error("Authentication failed:", error);
+            }
+            const root = ReactDOM.createRoot(document.getElementById('root'));
+            root.render(<StrictMode><App /></StrictMode>);
+        };
         
         if (window.db) {
             renderApp();
