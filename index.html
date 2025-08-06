@@ -151,7 +151,9 @@
             { id: 20, text: "A 7-sided regular polygon (a heptagon) has how many diagonals?", correctAnswer: "14", hint: "The formula for diagonals in an n-sided polygon is n(n-3)/2." },
             { id: 21, text: "In a pie chart of monthly expenses, the angle for groceries is 72°. What percentage of the total expenses does this represent?", correctAnswer: "20", hint: "A full circle is 360°. The percentage is (72/360) * 100." },
             { id: 22, text: "If matrix A = [[2, 1], [3, 4]] is multiplied by the identity matrix I = [[1, 0], [0, 1]], what is the top-left element of the resulting matrix?", correctAnswer: "2", hint: "Any matrix multiplied by the identity matrix results in the original matrix." },
-            { id: 24, text: "A library has 95,000 books. If 0.02% of them are rare ancient manuscripts, how many rare manuscripts are there?", correctAnswer: "19", hint: "0.02% is equivalent to 0.0002 as a decimal." }
+            { id: 24, text: "A library has 95,000 books. If 0.02% of them are rare ancient manuscripts, how many rare manuscripts are there?", correctAnswer: "19", hint: "0.02% is equivalent to 0.0002 as a decimal." },
+            // BUG FIX: Added one more question to ensure the list has 20 items before creating the final 25.
+            { id: 26, text: "Multiply matrices A=[[1, 2], [2, 1]] and B=[[2, 2], [2, 2]]. What is the sum of all elements in the resulting matrix?", correctAnswer: "24", hint: "The resulting matrix is C = A * B. Sum its four elements." }
         ];
         
         const createFinalQuestionOrder = () => {
@@ -184,7 +186,18 @@
             [0,6,12,18,24], [4,8,12,16,20]
         ];
 
-        function createSeededRandom(seed) { /* ... same as before ... */ }
+        function createSeededRandom(seed) {
+            let h = 1779033703 ^ seed.length;
+            for (let i = 0; i < seed.length; i++) {
+                h = Math.imul(h ^ seed.charCodeAt(i), 3432918353);
+                h = h << 13 | h >>> 19;
+            }
+            return function() {
+                h = Math.imul(h ^ h >>> 16, 2246822507);
+                h = Math.imul(h ^ h >>> 13, 3266489909);
+                return (h ^= h >>> 16) >>> 0;
+            }
+        }
 
         const BingoAnimation = () => ( <div className="bingo-overlay fade-in"><div className="bingo-text">BINGO!</div></div> );
 
@@ -218,7 +231,23 @@
             );
         };
 
-        const ConfirmationModal = ({ submission, onConfirm, onCancel }) => { /* ... same as before ... */ };
+        const ConfirmationModal = ({ submission, onConfirm, onCancel }) => {
+            if (!submission) return null;
+            return (
+                <div className="confirmation-modal">
+                    <div className="bg-gray-800 p-8 rounded-lg shadow-2xl text-center">
+                        <h3 className="text-2xl font-bold mb-4">Confirm Submission</h3>
+                        <p className="text-lg mb-2">Your answer for the current question is:</p>
+                        <p className="text-3xl font-mono bg-gray-900 text-cyan-400 py-2 px-4 rounded-md mb-6">Box #{submission.boxNumber}</p>
+                        <p className="text-yellow-400 mb-6">This is your only attempt. Are you sure?</p>
+                        <div className="flex justify-center gap-4">
+                            <button onClick={onConfirm} className="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-6 rounded-lg">Confirm</button>
+                            <button onClick={onCancel} className="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-6 rounded-lg">Cancel</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
         
         const ParticipantView = ({ seed }) => {
             const [card, setCard] = useState(null);
@@ -308,7 +337,7 @@
             const renderCell = (cellIndex) => {
                 const number = card.cardNumbers[cellIndex];
                 const isMarked = card.markedIndices?.includes(cellIndex);
-                const isIncorrect = card.incorrectAttempts?.[gameState.activeQuestionId] === cellIndex;
+                const isIncorrect = Object.values(card.incorrectAttempts || {}).includes(cellIndex);
                 const isQuestionActive = gameState.isTimerRunning && timeLeft > 0 && gameState.activeQuestionId && !card.attempts?.[gameState.activeQuestionId];
                 
                 if (isMarked) {
@@ -352,14 +381,14 @@
             );
         };
 
-        const AdminBingoCard = ({ numbers, markedIndices, incorrectAttempts, activeQuestionId }) => {
+        const AdminBingoCard = ({ numbers, markedIndices, incorrectAttempts }) => {
             const markedSet = new Set(markedIndices || []);
-            const incorrectIndex = incorrectAttempts?.[activeQuestionId];
+            const incorrectSet = new Set(Object.values(incorrectAttempts || {}));
             return (
                 <div className="admin-card grid grid-cols-5 gap-1 p-1 bg-gray-800 rounded-md mt-2">
                     {numbers.map((number, i) => {
                         const isMarked = markedSet.has(i);
-                        const isIncorrect = i === incorrectIndex;
+                        const isIncorrect = incorrectSet.has(i);
                         let cellClass = 'bg-gray-700';
                         if (isMarked) cellClass = 'marked';
                         if (isIncorrect) cellClass = 'incorrect';
@@ -372,7 +401,6 @@
         const GameControlPanel = ({ onResetGame, isResetting }) => {
             const [gameState, setGameState] = useState({ questionIndex: -1 });
             const [timeLeft, setTimeLeft] = useState(0);
-            const [isConfirmingAction, setIsConfirmingAction] = useState(false);
 
             useEffect(() => {
                 const gameStateRef = window.firebase.doc(window.db, `/artifacts/${window.appId}/public/data/game-state/current`);
@@ -560,7 +588,7 @@
                                             {isConfirming ? 'Confirm?' : 'Del'}
                                         </button>
                                     </div>
-                                    {card.cardNumbers && <AdminBingoCard numbers={card.cardNumbers} markedIndices={card.markedIndices} incorrectAttempts={card.incorrectAttempts} activeQuestionId={gameState.activeQuestionId} />}
+                                    {card.cardNumbers && <AdminBingoCard numbers={card.cardNumbers} markedIndices={card.markedIndices} incorrectAttempts={card.incorrectAttempts} />}
                                     <p className="text-xs text-gray-500 mt-2 font-mono">{card.id}</p>
                                 </div>
                             );
