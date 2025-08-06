@@ -137,14 +137,6 @@
                 return (h ^= h >>> 16) >>> 0;
             }
         }
-        function getShuffledNumbers(randomFunc, min, max) {
-            const allNumbers = Array.from({ length: max - min + 1 }, (_, i) => i + min);
-            for (let i = allNumbers.length - 1; i > 0; i--) {
-                const j = randomFunc() % (i + 1);
-                [allNumbers[i], allNumbers[j]] = [allNumbers[j], allNumbers[i]];
-            }
-            return allNumbers;
-        }
 
         // --- SHARED COMPONENTS ---
         const BingoAnimation = () => ( <div className="bingo-overlay fade-in"><div className="bingo-text">BINGO!</div></div> );
@@ -202,7 +194,7 @@
                         setTimeLeft(secondsLeft);
                         if (secondsLeft === 0) clearInterval(timerInterval);
                     };
-                    updateTimer(); // Initial call
+                    updateTimer();
                     const timerInterval = setInterval(updateTimer, 1000);
                     return () => clearInterval(timerInterval);
                 }
@@ -220,7 +212,7 @@
             }, [card?.markedIndices]);
 
             const handleSubmitAnswer = async (questionId, submittedKey) => {
-                if (!submittedKey || card.attempts?.[questionId]) return; // Already attempted
+                if (!submittedKey || card.attempts?.[questionId]) return;
 
                 const question = QUESTIONS_DATA.find(q => q.id === questionId);
                 const isCorrect = question.correctKey.toUpperCase() === submittedKey.toUpperCase();
@@ -230,8 +222,7 @@
                 if (isCorrect) {
                     const cellIndex = card.cardNumbers.findIndex(n => n === questionId);
                     if (cellIndex !== -1) {
-                        const gridIndex = cellIndex >= 12 ? cellIndex + 1 : cellIndex;
-                        newMarks.add(gridIndex);
+                        newMarks.add(cellIndex);
                     }
                 }
 
@@ -242,10 +233,7 @@
             };
 
             const renderCell = (cellIndex) => {
-                const isCenter = cellIndex === 12;
-                if (isCenter) return <div key={cellIndex} className="bingo-cell marked flex items-center justify-center">★</div>;
-
-                const number = card.cardNumbers[cellIndex > 12 ? cellIndex - 1 : cellIndex];
+                const number = card.cardNumbers[cellIndex];
                 const isMarked = card.markedIndices?.includes(cellIndex);
                 const isActive = gameState.activeQuestionId === number && timeLeft > 0;
                 const wasAttempted = card.attempts?.[number];
@@ -272,7 +260,7 @@
                 return <div key={cellIndex} className={`bingo-cell flex items-center justify-center text-xl md:text-2xl font-bold rounded-md ${cellColor}`}>{number}</div>;
             };
             
-            if (!card) return <div>Loading Card...</div>;
+            if (!card?.cardNumbers) return <div>Loading Card...</div>;
 
             return (
                 <div className="w-full max-w-md mx-auto text-center">
@@ -291,12 +279,10 @@
 
         // --- ADMIN VIEW ---
         const AdminBingoCard = ({ numbers, markedIndices }) => {
-            const markedSet = new Set(markedIndices || [12]);
+            const markedSet = new Set(markedIndices || []);
             return (
                 <div className="admin-card grid grid-cols-5 gap-1 p-1 bg-gray-800 rounded-md mt-2">
-                    {Array.from({ length: 25 }).map((_, i) => {
-                        const isCenter = i === 12;
-                        const number = isCenter ? "★" : numbers[i > 12 ? i - 1 : i];
+                    {numbers.map((number, i) => {
                         const isMarked = markedSet.has(i);
                         return <div key={i} className={`bingo-cell flex items-center justify-center rounded bg-gray-700 aspect-square ${isMarked ? 'marked' : ''}`}>{number}</div>;
                     })}
@@ -439,7 +425,7 @@
 
             // Leader Highlighting Logic
             const scores = cards.map(card => card.markedIndices?.length || 0);
-            const maxScore = Math.max(...scores, 1); // Use 1 as minimum to avoid highlighting all on 0
+            const maxScore = scores.length > 0 ? Math.max(...scores) : 0;
 
             if (loading) return <div>Loading Admin Panel...</div>;
 
@@ -450,7 +436,7 @@
                     {cards.length === 0 && <p className="text-gray-500 py-4 bg-gray-800 rounded-lg">No cards have been generated yet.</p>}
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                         {cards.map(card => {
-                            const isLeader = (card.markedIndices?.length || 0) === maxScore;
+                            const isLeader = (card.markedIndices?.length || 0) === maxScore && maxScore > 0;
                             const leaderClass = isLeader ? 'ring-2 ring-amber-400 shadow-lg' : '';
                             const isConfirming = confirmingDelete === card.id;
 
@@ -471,7 +457,7 @@
                                             {isConfirming ? 'Confirm?' : 'Del'}
                                         </button>
                                     </div>
-                                    <AdminBingoCard numbers={card.cardNumbers} markedIndices={card.markedIndices} />
+                                    {card.cardNumbers && <AdminBingoCard numbers={card.cardNumbers} markedIndices={card.markedIndices} />}
                                     <p className="text-xs text-gray-500 mt-2 font-mono">{card.id}</p>
                                 </div>
                             );
@@ -505,11 +491,13 @@
 
                  const randomFunc = createSeededRandom(newSeed);
                  const allQuestionNumbers = Array.from({ length: BINGO_MAX_NUMBER }, (_, i) => i + 1);
-                 for (let i = allQuestionNumbers.length - 1; i > 0; i--) { // Shuffle all 30
+                 
+                 // Fisher-Yates shuffle
+                 for (let i = allQuestionNumbers.length - 1; i > 0; i--) {
                     const j = randomFunc() % (i + 1);
                     [allQuestionNumbers[i], allQuestionNumbers[j]] = [allQuestionNumbers[j], allQuestionNumbers[i]];
                  }
-                 const cardNumbers = allQuestionNumbers.slice(0, 24); // Take first 24 for the card
+                 const cardNumbers = allQuestionNumbers.slice(0, 25); // Take first 25 for the card
 
                  const cardDocPath = `/artifacts/${window.appId}/public/data/equatino-cards/${newSeed}`;
                  
@@ -517,7 +505,7 @@
                      seed: newSeed,
                      teamName: "",
                      cardNumbers: cardNumbers,
-                     markedIndices: [12], // Start with center marked
+                     markedIndices: [], // Start with no squares marked
                      attempts: {}, // To track one-shot rule
                      createdAt: window.firebase.serverTimestamp()
                  }).catch(error => {
@@ -577,6 +565,7 @@
             } catch (error) {
                 console.error("Authentication failed:", error);
             }
+            // BUG FIX: Use the correct React 18 createRoot API
             const root = ReactDOM.createRoot(document.getElementById('root'));
             root.render(<StrictMode><App /></StrictMode>);
         };
